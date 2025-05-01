@@ -22,7 +22,7 @@ COPY --from=build-venv /venv /venv
 
 ENV PATH="/opt/venv/bin:$PATH"
 ADD HoymilesZeroExport.py /app/
-ADD config_provider.py /app/
+ADD ConfigProvider.py /app/
 ADD HoymilesZeroExport_Config.ini /app/
 WORKDIR /app/
 ENTRYPOINT ["/venv/bin/python3", "HoymilesZeroExport.py"]

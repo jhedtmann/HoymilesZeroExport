@@ -19,22 +19,24 @@ __contributors__ = "Jörg Hedtmann, <df3ei@db0kk.org>"
 __version__ = "1.112"
 
 import time
+import os
+import logging
+import sys
+import argparse
+import subprocess
+import json
+
 from requests.sessions import Session
 from requests.auth import HTTPBasicAuth
 from requests.auth import HTTPDigestAuth
 from requests.adapters import HTTPAdapter
 from urllib3.util import Retry
-import os
-import logging
 from logging.handlers import TimedRotatingFileHandler
 from configparser import ConfigParser
 from pathlib import Path
-import sys
 from packaging import version
-import argparse 
-import subprocess
-from config_provider import ConfigFileConfigProvider, MqttHandler, ConfigProviderChain
-import json
+
+from ConfigProvider import ConfigFileConfigProvider, MqttHandler, ConfigProviderChain
 
 session = Session()
 logging.basicConfig(
