@@ -1,5 +1,12 @@
 # Hoymiles Zero Export Control / Hoymiles Nulleinspeisung
 
+## Preface
+I forked this excellent project to adjust it to my specific situation with a mix of inverters (which are not all Hoymiles), a Growatt battery pack and an emergency power supply
+connected. In the process I try to align the code base with the commonly accepted naming and coding conventions for Python, and apply some other best practices to the code,
+such as better modularisation, the use of classes etc. This is by no means criticism on the original author, but a reflection on my coding habits and requirements.
+
+If you have any additional suggestions, please feel free to add them to the issues list.
+
 ## Introduction
 Hoymiles Zero Export is a Python script for managing the power of the Hoymiles inverters to reduce the amount of the generated power to the grid. Based on the current power output, the script can automatically adjust the export limit of the inverter, allowing for optimal energy management.
 
