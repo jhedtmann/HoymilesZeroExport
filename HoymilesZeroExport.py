@@ -15,7 +15,8 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 __author__ = "Tobias Kraft"
-__version__ = "1.104"
+__contributors__ = "Jörg Hedtmann, <df3ei@db0kk.org>"
+__version__ = "1.112"
 
 import time
 from requests.sessions import Session
@@ -88,7 +89,7 @@ except:
     logger.info('Error: your Python version is too old, this script requires version 3.8 or newer. Please update your Python.')
     sys.exit()
 
-def CastToInt(pValueToCast):
+def cast_to_int(pValueToCast):
     try:
         result = int(pValueToCast)
         return result
@@ -101,33 +102,33 @@ def CastToInt(pValueToCast):
         logger.error("Exception at CastToInt")
         raise
 
-def SetLimit(pLimit):
+def set_limit(pLimit):
     try:
-        if not hasattr(SetLimit, "LastLimit"):
-            SetLimit.LastLimit = CastToInt(0)
-        if not hasattr(SetLimit, "LastLimitAck"):
-            SetLimit.LastLimitAck = bool(False)
-        if (SetLimit.LastLimit == CastToInt(pLimit)) and SetLimit.LastLimitAck:
-            logger.info("Inverterlimit was already accepted at %s Watt",CastToInt(pLimit))
+        if not hasattr(set_limit, "LastLimit"):
+            set_limit.LastLimit = cast_to_int(0)
+        if not hasattr(set_limit, "LastLimitAck"):
+            set_limit.LastLimitAck = bool(False)
+        if (set_limit.LastLimit == cast_to_int(pLimit)) and set_limit.LastLimitAck:
+            logger.info("Inverterlimit was already accepted at %s Watt", cast_to_int(pLimit))
             CrossCheckLimit()
             return
-        if (SetLimit.LastLimit == CastToInt(pLimit)) and not SetLimit.LastLimitAck:
-            logger.info("Inverterlimit %s Watt was previously not accepted by at least one inverter, trying again...",CastToInt(pLimit))
+        if (set_limit.LastLimit == cast_to_int(pLimit)) and not set_limit.LastLimitAck:
+            logger.info("Inverterlimit %s Watt was previously not accepted by at least one inverter, trying again...", cast_to_int(pLimit))
 
-        logger.info("setting new limit to %s Watt",CastToInt(pLimit))
-        SetLimit.LastLimit = CastToInt(pLimit)
-        SetLimit.LastLimitAck = True
+        logger.info("setting new limit to %s Watt", cast_to_int(pLimit))
+        set_limit.LastLimit = cast_to_int(pLimit)
+        set_limit.LastLimitAck = True
 
-        min_watt_all_inverters = GetMinWattFromAllInverters()
-        if (CastToInt(pLimit) <= min_watt_all_inverters):
+        min_watt_all_inverters = get_min_watt_from_all_inverters()
+        if (cast_to_int(pLimit) <= min_watt_all_inverters):
             pLimit = min_watt_all_inverters # set only minWatt for every inv.
-            PublishGlobalState("limit", min_watt_all_inverters)
+            publish_global_state("limit", min_watt_all_inverters)
         else:
-            PublishGlobalState("limit", CastToInt(pLimit))
+            publish_global_state("limit", cast_to_int(pLimit))
 
-        RemainingLimit = CastToInt(pLimit)
+        RemainingLimit = cast_to_int(pLimit)
 
-        RemainingLimit -= GetMinWattFromAllInverters()
+        RemainingLimit -= get_min_watt_from_all_inverters()
 
         # Handle non-battery inverters first
         if RemainingLimit >= GetMaxWattFromAllNonBatteryInverters() - GetMinWattFromAllNonBatteryInverters():
@@ -140,19 +141,19 @@ def SetLimit(pLimit):
                 continue
 
             # Calculate proportional limit for non-battery inverters
-            NewLimit = CastToInt(nonBatteryInvertersLimit * (HOY_MAX_WATT[i] - GetMinWatt(i)) / (GetMaxWattFromAllNonBatteryInverters() - GetMinWattFromAllNonBatteryInverters()))
+            NewLimit = cast_to_int(nonBatteryInvertersLimit * (HOY_MAX_WATT[i] - GetMinWatt(i)) / (GetMaxWattFromAllNonBatteryInverters() - GetMinWattFromAllNonBatteryInverters()))
 
             NewLimit += GetMinWatt(i)
 
             # Apply the calculated limit to the inverter
             NewLimit = ApplyLimitsToSetpointInverter(i, NewLimit)
             if HOY_COMPENSATE_WATT_FACTOR[i] != 1:
-                logger.info('Ahoy: Inverter "%s": compensate Limit from %s Watt to %s Watt', NAME[i], CastToInt(NewLimit), CastToInt(NewLimit*HOY_COMPENSATE_WATT_FACTOR[i]))
-                NewLimit = CastToInt(NewLimit * HOY_COMPENSATE_WATT_FACTOR[i])
+                logger.info('Ahoy: Inverter "%s": compensate Limit from %s Watt to %s Watt', NAME[i], cast_to_int(NewLimit), cast_to_int(NewLimit * HOY_COMPENSATE_WATT_FACTOR[i]))
+                NewLimit = cast_to_int(NewLimit * HOY_COMPENSATE_WATT_FACTOR[i])
                 NewLimit = ApplyLimitsToMaxInverterLimits(i, NewLimit)
 
-            if (NewLimit == CastToInt(CURRENT_LIMIT[i])) and LASTLIMITACKNOWLEDGED[i]:
-                logger.info('Inverter "%s": Already at %s Watt',NAME[i],CastToInt(NewLimit))
+            if (NewLimit == cast_to_int(CURRENT_LIMIT[i])) and LASTLIMITACKNOWLEDGED[i]:
+                logger.info('Inverter "%s": Already at %s Watt', NAME[i], cast_to_int(NewLimit))
                 continue
 
             LASTLIMITACKNOWLEDGED[i] = True
@@ -160,7 +161,7 @@ def SetLimit(pLimit):
             PublishInverterState(i, "limit", NewLimit)
             DTU.SetLimit(i, NewLimit)
             if not DTU.WaitForAck(i, SET_LIMIT_TIMEOUT_SECONDS):
-                SetLimit.LastLimitAck = False
+                set_limit.LastLimitAck = False
                 LASTLIMITACKNOWLEDGED[i] = False
 
         # Adjust RemainingLimit based on what was assigned to non-battery inverters
@@ -186,17 +187,17 @@ def SetLimit(pLimit):
                     continue
 
                 # Calculate proportional limit for battery inverters
-                NewLimit = CastToInt(LimitPrio * (HOY_MAX_WATT[i] - GetMinWatt(i)) / (GetMaxWattFromAllBatteryInvertersSamePrio(j) - GetMinWattFromAllBatteryInvertersWithSamePriority(j)))
+                NewLimit = cast_to_int(LimitPrio * (HOY_MAX_WATT[i] - GetMinWatt(i)) / (GetMaxWattFromAllBatteryInvertersSamePrio(j) - GetMinWattFromAllBatteryInvertersWithSamePriority(j)))
                 NewLimit += GetMinWatt(i)
 
                 NewLimit = ApplyLimitsToSetpointInverter(i, NewLimit)
                 if HOY_COMPENSATE_WATT_FACTOR[i] != 1:
-                    logger.info('Ahoy: Inverter "%s": compensate Limit from %s Watt to %s Watt', NAME[i], CastToInt(NewLimit), CastToInt(NewLimit*HOY_COMPENSATE_WATT_FACTOR[i]))
-                    NewLimit = CastToInt(NewLimit * HOY_COMPENSATE_WATT_FACTOR[i])
+                    logger.info('Ahoy: Inverter "%s": compensate Limit from %s Watt to %s Watt', NAME[i], cast_to_int(NewLimit), cast_to_int(NewLimit * HOY_COMPENSATE_WATT_FACTOR[i]))
+                    NewLimit = cast_to_int(NewLimit * HOY_COMPENSATE_WATT_FACTOR[i])
                     NewLimit = ApplyLimitsToMaxInverterLimits(i, NewLimit)
 
-                if (NewLimit == CastToInt(CURRENT_LIMIT[i])) and LASTLIMITACKNOWLEDGED[i]:
-                    logger.info('Inverter "%s": Already at %s Watt',NAME[i],CastToInt(NewLimit))
+                if (NewLimit == cast_to_int(CURRENT_LIMIT[i])) and LASTLIMITACKNOWLEDGED[i]:
+                    logger.info('Inverter "%s": Already at %s Watt', NAME[i], cast_to_int(NewLimit))
                     continue
 
                 LASTLIMITACKNOWLEDGED[i] = True
@@ -204,13 +205,13 @@ def SetLimit(pLimit):
                 PublishInverterState(i, "limit", NewLimit)
                 DTU.SetLimit(i, NewLimit)
                 if not DTU.WaitForAck(i, SET_LIMIT_TIMEOUT_SECONDS):
-                    SetLimit.LastLimitAck = False
+                    set_limit.LastLimitAck = False
                     LASTLIMITACKNOWLEDGED[i] = False
 
             RemainingLimit -= LimitPrio
     except:
         logger.error("Exception at SetLimit")
-        SetLimit.LastLimitAck = False
+        set_limit.LastLimitAck = False
         raise
 
 def ResetInverterData(pInverterId):
@@ -223,7 +224,7 @@ def ResetInverterData(pInverterId):
         {"SamePowerStatusCnt": 0},
     ]
     target_objects = [
-        SetLimit,
+        set_limit,
         GetHoymilesPanelMinVoltage,
     ]
     for target_object in target_objects:
@@ -241,7 +242,7 @@ def ResetInverterData(pInverterId):
     HOY_BATTERY_GOOD_VOLTAGE[pInverterId] = True
     TEMPERATURE[pInverterId] = str('--- degC')
 
-def GetHoymilesAvailable():
+def get_hoymiles_available():
     try:
         GetHoymilesAvailable = False
         for i in range(INVERTER_COUNT):
@@ -300,23 +301,24 @@ def GetHoymilesPanelMinVoltage(pInverterId):
         logger.error("Exception at GetHoymilesPanelMinVoltage, Inverter %s not reachable", pInverterId)
         raise
 
-def SetHoymilesPowerStatus(pInverterId, pActive):
+def set_hoymiles_power_status(pInverterId, pActive):
+    logger.debug(f'{pInverterId} is now {pActive}')
     try:
         if not AVAILABLE[pInverterId]:
             return
         if SET_POWERSTATUS_CNT > 0:
-            if not hasattr(SetHoymilesPowerStatus, "LastPowerStatus"):
-                SetHoymilesPowerStatus.LastPowerStatus = []
-                SetHoymilesPowerStatus.LastPowerStatus = [False for i in range(INVERTER_COUNT)]
-            if not hasattr(SetHoymilesPowerStatus, "SamePowerStatusCnt"):
-                SetHoymilesPowerStatus.SamePowerStatusCnt = []
-                SetHoymilesPowerStatus.SamePowerStatusCnt = [0 for i in range(INVERTER_COUNT)]
-            if SetHoymilesPowerStatus.LastPowerStatus[pInverterId] == pActive:
-                SetHoymilesPowerStatus.SamePowerStatusCnt[pInverterId] = SetHoymilesPowerStatus.SamePowerStatusCnt[pInverterId] + 1
+            if not hasattr(set_hoymiles_power_status, "LastPowerStatus"):
+                set_hoymiles_power_status.LastPowerStatus = []
+                set_hoymiles_power_status.LastPowerStatus = [False for i in range(INVERTER_COUNT)]
+            if not hasattr(set_hoymiles_power_status, "SamePowerStatusCnt"):
+                set_hoymiles_power_status.SamePowerStatusCnt = []
+                set_hoymiles_power_status.SamePowerStatusCnt = [0 for i in range(INVERTER_COUNT)]
+            if set_hoymiles_power_status.LastPowerStatus[pInverterId] == pActive:
+                set_hoymiles_power_status.SamePowerStatusCnt[pInverterId] = set_hoymiles_power_status.SamePowerStatusCnt[pInverterId] + 1
             else:
-                SetHoymilesPowerStatus.LastPowerStatus[pInverterId] = pActive
-                SetHoymilesPowerStatus.SamePowerStatusCnt[pInverterId] = 0
-            if SetHoymilesPowerStatus.SamePowerStatusCnt[pInverterId] > SET_POWERSTATUS_CNT:
+                set_hoymiles_power_status.LastPowerStatus[pInverterId] = pActive
+                set_hoymiles_power_status.SamePowerStatusCnt[pInverterId] = 0
+            if set_hoymiles_power_status.SamePowerStatusCnt[pInverterId] > SET_POWERSTATUS_CNT:
                 if pActive:
                     logger.info("Retry Counter exceeded: Inverter PowerStatus already ON")
                 else:
@@ -338,7 +340,7 @@ def GetNumberArray(pExcludedPanels):
         result.append(number)
     return result
 
-def GetCheckBattery():
+def get_check_battery():
     try:
         result = False
         for i in range(INVERTER_COUNT):
@@ -351,30 +353,30 @@ def GetCheckBattery():
                 minVoltage = GetHoymilesPanelMinVoltage(i)
 
                 if minVoltage <= HOY_BATTERY_THRESHOLD_OFF_LIMIT_IN_V[i]:
-                    SetHoymilesPowerStatus(i, False)
+                    set_hoymiles_power_status(i, False)
                     HOY_BATTERY_GOOD_VOLTAGE[i] = False
                     HOY_MAX_WATT[i] = CONFIG_PROVIDER.get_reduce_wattage(i)
 
                 elif minVoltage <= HOY_BATTERY_THRESHOLD_REDUCE_LIMIT_IN_V[i]:
                     if HOY_MAX_WATT[i] != CONFIG_PROVIDER.get_reduce_wattage(i):
                         HOY_MAX_WATT[i] = CONFIG_PROVIDER.get_reduce_wattage(i)
-                        SetLimit.LastLimit = -1
+                        set_limit.LastLimit = -1
 
                 elif minVoltage >= HOY_BATTERY_THRESHOLD_ON_LIMIT_IN_V[i]:
-                    SetHoymilesPowerStatus(i, True)
+                    set_hoymiles_power_status(i, True)
                     if not HOY_BATTERY_GOOD_VOLTAGE[i]:
                         DTU.SetLimit(i, GetMinWatt(i))
                         DTU.WaitForAck(i, SET_LIMIT_TIMEOUT_SECONDS)
-                        SetLimit.LastLimit = -1
+                        set_limit.LastLimit = -1
                     HOY_BATTERY_GOOD_VOLTAGE[i] = True
                     if (minVoltage >= HOY_BATTERY_THRESHOLD_NORMAL_LIMIT_IN_V[i]) and (HOY_MAX_WATT[i] != CONFIG_PROVIDER.get_normal_wattage(i)):
                         HOY_MAX_WATT[i] = CONFIG_PROVIDER.get_normal_wattage(i)
-                        SetLimit.LastLimit = -1
+                        set_limit.LastLimit = -1
 
                 elif minVoltage >= HOY_BATTERY_THRESHOLD_NORMAL_LIMIT_IN_V[i]:
                     if HOY_MAX_WATT[i] != CONFIG_PROVIDER.get_normal_wattage(i):
                         HOY_MAX_WATT[i] = CONFIG_PROVIDER.get_normal_wattage(i)
-                        SetLimit.LastLimit = -1
+                        set_limit.LastLimit = -1
 
                 if HOY_BATTERY_GOOD_VOLTAGE[i]:
                     result = True
@@ -385,7 +387,7 @@ def GetCheckBattery():
         logger.error("Exception at CheckBattery")
         raise
 
-def GetHoymilesTemperature():
+def get_hoymiles_temperature():
     try:
         for i in range(INVERTER_COUNT):
             try:
@@ -396,7 +398,7 @@ def GetHoymilesTemperature():
         logger.error("Exception at GetHoymilesTemperature")
         raise
 
-def GetHoymilesActualPower():
+def get_hoymiles_actual_power():
     try:
         try:
             Watts = abs(INTERMEDIATE_POWERMETER.GetPowermeterWatts())
@@ -414,10 +416,10 @@ def GetHoymilesActualPower():
     except:
         logger.error("Exception at GetHoymilesActualPower")
         if SET_INVERTER_TO_MIN_ON_POWERMETER_ERROR:
-            SetLimit(0)
+            set_limit(0)
         raise
 
-def GetPowermeterWatts():
+def get_powermeter_watts():
     try:
         Watts = POWERMETER.GetPowermeterWatts()
         logger.info(f"powermeter {POWERMETER.__class__.__name__}: {Watts} Watt")
@@ -425,27 +427,27 @@ def GetPowermeterWatts():
     except:
         logger.error("Exception at GetPowermeterWatts")
         if SET_INVERTER_TO_MIN_ON_POWERMETER_ERROR:
-            SetLimit(0)        
+            set_limit(0)        
         raise
 
 def GetMinWatt(pInverter: int):
     min_watt_percent = CONFIG_PROVIDER.get_min_wattage_in_percent(pInverter)
     return int(HOY_INVERTER_WATT[pInverter] * min_watt_percent / 100)
 
-def CutLimitToProduction(pSetpoint):
-    if pSetpoint != GetMaxWattFromAllInverters():
-        ActualPower = GetHoymilesActualPower()
+def cut_limit_to_production(pSetpoint):
+    if pSetpoint != get_max_watt_from_all_inverters():
+        ActualPower = get_hoymiles_actual_power()
         # prevent the setpoint from running away...
-        if pSetpoint > ActualPower + (GetMaxWattFromAllInverters() * MAX_DIFFERENCE_BETWEEN_LIMIT_AND_OUTPUTPOWER / 100):
-            pSetpoint = CastToInt(ActualPower + (GetMaxWattFromAllInverters() * MAX_DIFFERENCE_BETWEEN_LIMIT_AND_OUTPUTPOWER / 100))
-            logger.info('Cut limit to %s Watt, limit was higher than %s percent of live-production', CastToInt(pSetpoint), MAX_DIFFERENCE_BETWEEN_LIMIT_AND_OUTPUTPOWER)
-    return CastToInt(pSetpoint)
+        if pSetpoint > ActualPower + (get_max_watt_from_all_inverters() * MAX_DIFFERENCE_BETWEEN_LIMIT_AND_OUTPUTPOWER / 100):
+            pSetpoint = cast_to_int(ActualPower + (get_max_watt_from_all_inverters() * MAX_DIFFERENCE_BETWEEN_LIMIT_AND_OUTPUTPOWER / 100))
+            logger.info('Cut limit to %s Watt, limit was higher than %s percent of live-production', cast_to_int(pSetpoint), MAX_DIFFERENCE_BETWEEN_LIMIT_AND_OUTPUTPOWER)
+    return cast_to_int(pSetpoint)
 
-def ApplyLimitsToSetpoint(pSetpoint):
-    if pSetpoint > GetMaxWattFromAllInverters():
-        pSetpoint = GetMaxWattFromAllInverters()
-    if pSetpoint < GetMinWattFromAllInverters():
-        pSetpoint = GetMinWattFromAllInverters()
+def check_and_apply_upper_and_lower_limits(pSetpoint):
+    if pSetpoint > get_max_watt_from_all_inverters():
+        pSetpoint = get_max_watt_from_all_inverters()
+    if pSetpoint < get_min_watt_from_all_inverters():
+        pSetpoint = get_min_watt_from_all_inverters()
     return pSetpoint
 
 def ApplyLimitsToSetpointInverter(pInverter, pSetpoint):
@@ -476,7 +478,7 @@ def CrossCheckLimit():
         logger.error("Exception at CrossCheckLimit")
         raise
 
-def GetMaxWattFromAllInverters():
+def get_max_watt_from_all_inverters():
     # Max possible Watts, can be reduced on battery mode
     maxWatt = 0
     for i in range(INVERTER_COUNT):
@@ -491,7 +493,7 @@ def GetMaxWattFromAllBatteryInvertersSamePrio(pPriority):
         if AVAILABLE[i] and HOY_BATTERY_GOOD_VOLTAGE[i] and HOY_BATTERY_MODE[i] and CONFIG_PROVIDER.get_battery_priority(i) == pPriority
     )
 
-def GetMaxInverterWattFromAllInverters():
+def get_max_inverter_watt_from_all_inverters():
     # Max possible Watts (physically) - Inverter Specification!
     maxWatt = 0
     for i in range(INVERTER_COUNT):
@@ -506,7 +508,7 @@ def GetMaxWattFromAllNonBatteryInverters():
         if AVAILABLE[i] and not HOY_BATTERY_MODE[i] and HOY_BATTERY_GOOD_VOLTAGE[i]
     )
 
-def GetMinWattFromAllInverters():
+def get_min_watt_from_all_inverters():
     minWatt = 0
     for i in range(INVERTER_COUNT):
         if (not AVAILABLE[i]) or (not HOY_BATTERY_GOOD_VOLTAGE[i]):
@@ -538,7 +540,7 @@ def GetMinWattFromAllBatteryInvertersWithSamePriority(pPriority):
         minWatt = minWatt + GetMinWatt(i)
     return minWatt  
 
-def PublishConfigState():
+def publish_config_state():
     if MQTT is None:
         return
     MQTT.publish_state("on_grid_usage_jump_to_limit_percent", CONFIG_PROVIDER.on_grid_usage_jump_to_limit_percent())
@@ -554,7 +556,7 @@ def PublishConfigState():
         MQTT.publish_inverter_state(i, "reduce_watt", CONFIG_PROVIDER.get_reduce_wattage(i))
         MQTT.publish_inverter_state(i, "battery_priority", CONFIG_PROVIDER.get_battery_priority(i))
 
-def PublishGlobalState(state_name, state_value):
+def publish_global_state(state_name, state_value):
     if MQTT is None:
         return
     MQTT.publish_state(state_name, state_value)
@@ -590,11 +592,11 @@ class Tasmota(Powermeter):
         else:
             ParsedData = self.GetJson(f'/cm?user={self.user}&password={self.password}&cmnd=status%2010')
         if not self.json_power_calculate:
-            return CastToInt(ParsedData[self.json_status][self.json_payload_mqtt_prefix][self.json_power_mqtt_label])
+            return cast_to_int(ParsedData[self.json_status][self.json_payload_mqtt_prefix][self.json_power_mqtt_label])
         else:
             input = ParsedData[self.json_status][self.json_payload_mqtt_prefix][self.json_power_input_mqtt_label]
             ouput = ParsedData[self.json_status][self.json_payload_mqtt_prefix][self.json_power_output_mqtt_label]
-            return CastToInt(input - ouput)
+            return cast_to_int(input - ouput)
 
 class Shelly(Powermeter):
     def __init__(self, ip: str, user: str, password: str, emeterindex: str):
@@ -618,26 +620,26 @@ class Shelly(Powermeter):
 
 class Shelly1PM(Shelly):
     def GetPowermeterWatts(self):
-        return CastToInt(self.GetJson('/status')['meters'][0]['power'])
+        return cast_to_int(self.GetJson('/status')['meters'][0]['power'])
 
 class ShellyPlus1PM(Shelly):
     def GetPowermeterWatts(self):
-        return CastToInt(self.GetRpcJson('/Switch.GetStatus?id=0')['apower'])
+        return cast_to_int(self.GetRpcJson('/Switch.GetStatus?id=0')['apower'])
 
 class ShellyEM(Shelly):
     def GetPowermeterWatts(self):
         if self.emeterindex:
-            return CastToInt(self.GetJson(f'/emeter/{self.emeterindex}')['power'])
+            return cast_to_int(self.GetJson(f'/emeter/{self.emeterindex}')['power'])
         else:
-            return sum(CastToInt(emeter['power']) for emeter in self.GetJson('/status')['emeters'])
+            return sum(cast_to_int(emeter['power']) for emeter in self.GetJson('/status')['emeters'])
 
 class Shelly3EM(Shelly):
     def GetPowermeterWatts(self):
-        return CastToInt(self.GetJson('/status')['total_power'])
+        return cast_to_int(self.GetJson('/status')['total_power'])
 
 class Shelly3EMPro(Shelly):
     def GetPowermeterWatts(self):
-        return CastToInt(self.GetRpcJson('/EM.GetStatus?id=0')['total_act_power'])
+        return cast_to_int(self.GetRpcJson('/EM.GetStatus?id=0')['total_act_power'])
 
 class ESPHome(Powermeter):
     def __init__(self, ip: str, port: str, domain: str, id: str):
@@ -652,7 +654,7 @@ class ESPHome(Powermeter):
 
     def GetPowermeterWatts(self):
         ParsedData = self.GetJson(f'/{self.domain}/{self.id}')
-        return CastToInt(ParsedData['value'])
+        return cast_to_int(ParsedData['value'])
 
 class Shrdzm(Powermeter):
     def __init__(self, ip: str, user: str, password: str):
@@ -666,7 +668,7 @@ class Shrdzm(Powermeter):
 
     def GetPowermeterWatts(self):
         ParsedData = self.GetJson(f'/getLastData?user={self.user}&password={self.password}')
-        return CastToInt(CastToInt(ParsedData['1.7.0']) - CastToInt(ParsedData['2.7.0']))
+        return cast_to_int(cast_to_int(ParsedData['1.7.0']) - cast_to_int(ParsedData['2.7.0']))
 
 class Emlog(Powermeter):
     def __init__(self, ip: str, meterindex: str, json_power_calculate: bool):
@@ -681,11 +683,11 @@ class Emlog(Powermeter):
     def GetPowermeterWatts(self):
         ParsedData = self.GetJson(f'/pages/getinformation.php?heute&meterindex={self.meterindex}')
         if not self.json_power_calculate:
-            return CastToInt(ParsedData['Leistung170'])
+            return cast_to_int(ParsedData['Leistung170'])
         else:
             input = ParsedData['Leistung170']
             ouput = ParsedData['Leistung270']
-            return CastToInt(input - ouput)
+            return cast_to_int(input - ouput)
 
 class IoBroker(Powermeter):
     def __init__(self, ip: str, port: str, current_power_alias: str, power_calculate: bool, power_input_alias: str, power_output_alias: str):
@@ -705,15 +707,15 @@ class IoBroker(Powermeter):
             ParsedData = self.GetJson(f'/getBulk/{self.current_power_alias}')
             for item in ParsedData:
                 if item['id'] == self.current_power_alias:
-                    return CastToInt(item['val'])
+                    return cast_to_int(item['val'])
         else:
             ParsedData = self.GetJson(f'/getBulk/{self.power_input_alias},{self.power_output_alias}')
             for item in ParsedData:
                 if item['id'] == self.power_input_alias:
-                    input = CastToInt(item['val'])
+                    input = cast_to_int(item['val'])
                 if item['id'] == self.power_output_alias:
-                    output = CastToInt(item['val'])
-            return CastToInt(input - output)
+                    output = cast_to_int(item['val'])
+            return cast_to_int(input - output)
 
 class HomeAssistant(Powermeter):
     def __init__(self, ip: str, port: str, use_https: bool, access_token: str, current_power_entity: str, power_calculate: bool, power_input_alias: str, power_output_alias: str):
@@ -737,13 +739,13 @@ class HomeAssistant(Powermeter):
     def GetPowermeterWatts(self):
         if not self.power_calculate:
             ParsedData = self.GetJson(f"/api/states/{self.current_power_entity}")
-            return CastToInt(ParsedData['state'])
+            return cast_to_int(ParsedData['state'])
         else:
             ParsedData = self.GetJson(f"/api/states/{self.power_input_alias}")
-            input = CastToInt(ParsedData['state'])
+            input = cast_to_int(ParsedData['state'])
             ParsedData = self.GetJson(f"/api/states/{self.power_output_alias}")
-            output = CastToInt(ParsedData['state'])
-            return CastToInt(input - output)
+            output = cast_to_int(ParsedData['state'])
+            return cast_to_int(input - output)
 
 class VZLogger(Powermeter):
     def __init__(self, ip: str, port: str, uuid: str):
@@ -756,7 +758,7 @@ class VZLogger(Powermeter):
         return session.get(url, timeout=10).json()
 
     def GetPowermeterWatts(self):
-        return CastToInt(self.GetJson()['data'][0]['tuples'][0][1])
+        return cast_to_int(self.GetJson()['data'][0]['tuples'][0][1])
 
 class AmisReader(Powermeter):
     def __init__(self, ip: str):
@@ -768,11 +770,11 @@ class AmisReader(Powermeter):
 
     def GetPowermeterWatts(self):
         ParsedData = self.GetJson('/rest')
-        return CastToInt(ParsedData['saldo'])
+        return cast_to_int(ParsedData['saldo'])
     
 class DebugReader(Powermeter):
     def GetPowermeterWatts(self):
-        return CastToInt(input("Enter Powermeter Watts: "))
+        return cast_to_int(input("Enter Powermeter Watts: "))
 
 class DTU(Powermeter):
     def __init__(self, inverter_count: int):
@@ -784,7 +786,7 @@ class DTU(Powermeter):
     def GetPowermeterWatts(self):
         return sum(self.GetACPower(pInverterId) for pInverterId in range(self.inverter_count) if AVAILABLE[pInverterId] and HOY_BATTERY_GOOD_VOLTAGE[pInverterId])
     
-    def CheckMinVersion(self):
+    def check_min_version(self):
         raise NotImplementedError()
     
     def GetAvailable(self, pInverterId: int):
@@ -836,7 +838,7 @@ class AhoyDTU(DTU):
         ParsedData = self.GetJson('/api/live')
         ActualPower_index = ParsedData["ch0_fld_names"].index("P_AC")
         ParsedData = self.GetJson(f'/api/inverter/id/{pInverterId}')
-        return CastToInt(ParsedData["ch"][0][ActualPower_index])
+        return cast_to_int(ParsedData["ch"][0][ActualPower_index])
 
     def CheckMinVersion(self):
         MinVersion = '0.8.80'
@@ -932,7 +934,7 @@ class AhoyDTU(DTU):
             return False
     
     def SetLimit(self, pInverterId: int, pLimit: int):
-        logger.info('Ahoy: Inverter "%s": setting new limit from %s Watt to %s Watt',NAME[pInverterId],CastToInt(CURRENT_LIMIT[pInverterId]),CastToInt(pLimit))
+        logger.info('Ahoy: Inverter "%s": setting new limit from %s Watt to %s Watt', NAME[pInverterId], cast_to_int(CURRENT_LIMIT[pInverterId]), cast_to_int(pLimit))
         myobj = {'cmd': 'limit_nonpersistent_absolute', 'val': pLimit, "id": pInverterId, "token": self.Token}
         response = self.GetResponseJson('/api/ctrl', myobj)
         if response["success"] == False and response["error"] == "ERR_PROTECTED":
@@ -948,7 +950,7 @@ class AhoyDTU(DTU):
             logger.info('Ahoy: Inverter "%s": Turn on',NAME[pInverterId])
         else:
             logger.info('Ahoy: Inverter "%s": Turn off',NAME[pInverterId])
-        myobj = {'cmd': 'power', 'val': CastToInt(pActive == True), "id": pInverterId, "token": self.Token}
+        myobj = {'cmd': 'power', 'val': cast_to_int(pActive == True), "id": pInverterId, "token": self.Token}
         response = self.GetResponseJson('/api/ctrl', myobj)
         if response["success"] == False and response["error"] == "ERR_PROTECTED":
             self.Authenticate()
@@ -984,7 +986,7 @@ class OpenDTU(DTU):
 
     def GetACPower(self, pInverterId):
         ParsedData = self.GetJson(f'/api/livedata/status?inv={SERIAL_NUMBER[pInverterId]}')
-        return CastToInt(ParsedData['inverters'][0]['AC']['0']['Power']['v'])
+        return cast_to_int(ParsedData['inverters'][0]['AC']['0']['Power']['v'])
     
     def CheckMinVersion(self):
         MinVersion = 'v24.2.12'
@@ -1072,8 +1074,8 @@ class OpenDTU(DTU):
             return False
 
     def SetLimit(self, pInverterId: int, pLimit: int):
-        logger.info('OpenDTU: Inverter "%s": setting new limit from %s Watt to %s Watt',NAME[pInverterId],CastToInt(CURRENT_LIMIT[pInverterId]),CastToInt(pLimit))
-        relLimit = CastToInt(pLimit / HOY_INVERTER_WATT[pInverterId] * 100)
+        logger.info('OpenDTU: Inverter "%s": setting new limit from %s Watt to %s Watt', NAME[pInverterId], cast_to_int(CURRENT_LIMIT[pInverterId]), cast_to_int(pLimit))
+        relLimit = cast_to_int(pLimit / HOY_INVERTER_WATT[pInverterId] * 100)
         mySendStr = f'''data={{"serial":"{SERIAL_NUMBER[pInverterId]}", "limit_type":1, "limit_value":{relLimit}}}'''
         response = self.GetResponseJson('/api/limit/config', mySendStr)
         if response['type'] != 'success':
@@ -1085,7 +1087,10 @@ class OpenDTU(DTU):
             logger.info('OpenDTU: Inverter "%s": Turn on',NAME[pInverterId])
         else:
             logger.info('OpenDTU: Inverter "%s": Turn off',NAME[pInverterId])
-        mySendStr = f'''data={{"serial":"{SERIAL_NUMBER[pInverterId]}", "power":{json.dumps(pActive)}}}'''     
+
+        logger.debug(f'POWER: {pActive}')
+        mySendStr = f'''data={{"serial":"{SERIAL_NUMBER[pInverterId]}", "power":{str(pActive).lower()}}}'''
+        logger.info(mySendStr)
         response = self.GetResponseJson('/api/power/config', mySendStr)
         if response['type'] != 'success':
             raise Exception(f"Error: SetPowerStatus error: {response['message']}")
@@ -1095,7 +1100,7 @@ class DebugDTU(DTU):
         super().__init__(inverter_count)
 
     def GetACPower(self, pInverterId):
-        return CastToInt(input("Current AC-Power: "))
+        return cast_to_int(input("Current AC-Power: "))
 
     def CheckMinVersion(self):
         return
@@ -1105,7 +1110,7 @@ class DebugDTU(DTU):
         return True
 
     def GetActualLimitInW(self, pInverterId: int):
-        return CastToInt(input("Current InverterLimit: "))
+        return cast_to_int(input("Current InverterLimit: "))
 
     def GetInfo(self, pInverterId: int):
         SERIAL_NUMBER[pInverterId] = str(pInverterId)
@@ -1125,7 +1130,7 @@ class DebugDTU(DTU):
         return True
     
     def SetLimit(self, pInverterId: int, pLimit: int):
-        logger.info('Debug: Inverter "%s": setting new limit from %s Watt to %s Watt',NAME[pInverterId],CastToInt(CURRENT_LIMIT[pInverterId]),CastToInt(pLimit))
+        logger.info('Debug: Inverter "%s": setting new limit from %s Watt to %s Watt', NAME[pInverterId], cast_to_int(CURRENT_LIMIT[pInverterId]), cast_to_int(pLimit))
         CURRENT_LIMIT[pInverterId] = pLimit
 
     def SetPowerStatus(self, pInverterId: int, pActive: bool):
@@ -1148,7 +1153,7 @@ class Script(Powermeter):
 
     def GetPowermeterWatts(self):
         power = subprocess.check_output([self.file, self.ip, self.user, self.password])
-        return CastToInt(power)
+        return cast_to_int(power)
 
 def extract_json_value(data, path):
     from jsonpath_ng import parse
@@ -1441,7 +1446,8 @@ def CreateDTU() -> DTU:
         raise Exception("Error: no DTU defined!")
 
 # ----- START -----
-logger.info("Author: %s / Script Version: %s",__author__, __version__)
+logger.info("Author:         %s / Script Version: %s",__author__, __version__)
+logger.info("Contributor(s): %s", __contributors__)
 
 # read config:
 logger.info("read config file: " + str(Path.joinpath(Path(__file__).parent.resolve(), "HoymilesZeroExport_Config.ini")))
@@ -1482,6 +1488,7 @@ SLOW_APPROX_FACTOR_IN_PERCENT = config.getint('COMMON', 'SLOW_APPROX_FACTOR_IN_P
 LOG_TEMPERATURE = config.getboolean('COMMON', 'LOG_TEMPERATURE')
 SET_INVERTER_TO_MIN_ON_POWERMETER_ERROR = config.getboolean('COMMON', 'SET_INVERTER_TO_MIN_ON_POWERMETER_ERROR', fallback=False)
 powermeter_target_point = config.getint('CONTROL', 'POWERMETER_TARGET_POINT')
+MAX_UNLIMITED_CHARGE_SOC = config.getint('CONTROL', 'MAX_UNLIMITED_CHARGE_SOC')
 SERIAL_NUMBER = []
 ENABLED = []
 NAME = []
@@ -1528,10 +1535,11 @@ for i in range(INVERTER_COUNT):
     HOY_PANEL_VOLTAGE_LIST.append([])
     HOY_PANEL_MIN_VOLTAGE_HISTORY_LIST.append([])
     HOY_BATTERY_AVERAGE_CNT.append(config.getint('INVERTER_' + str(i + 1), 'HOY_BATTERY_AVERAGE_CNT', fallback=1))
-SLOW_APPROX_LIMIT = CastToInt(GetMaxWattFromAllInverters() * config.getint('COMMON', 'SLOW_APPROX_LIMIT_IN_PERCENT') / 100)
 
+SLOW_APPROX_LIMIT = cast_to_int(get_max_watt_from_all_inverters() * config.getint('COMMON', 'SLOW_APPROX_LIMIT_IN_PERCENT') / 100)
 CONFIG_PROVIDER = ConfigFileConfigProvider(config)
 MQTT = None
+
 if config.has_section("MQTT_CONFIG"):
     broker = config.get("MQTT_CONFIG", "MQTT_BROKER")
     port = config.getint("MQTT_CONFIG", "MQTT_PORT", fallback=1883)
@@ -1554,16 +1562,16 @@ if config.has_section("MQTT_CONFIG"):
 
 try:
     logger.info("---Init---")
-    newLimitSetpoint = 0
-    DTU.CheckMinVersion()
-    if GetHoymilesAvailable():
+    new_limit_setpoint = 0
+    DTU.check_min_version()
+    if get_hoymiles_available():
         for i in range(INVERTER_COUNT):
-            SetHoymilesPowerStatus(i, True)
-        newLimitSetpoint = GetMinWattFromAllInverters()
-        SetLimit(newLimitSetpoint)
-        GetHoymilesActualPower()
-        GetCheckBattery()
-    GetPowermeterWatts()
+            set_hoymiles_power_status(i, True)
+        new_limit_setpoint = get_min_watt_from_all_inverters()
+        set_limit(new_limit_setpoint)
+        get_hoymiles_actual_power()
+        get_check_battery()
+    get_powermeter_watts()
 except Exception as e:
     if hasattr(e, 'message'):
         logger.error(e.message)
@@ -1573,8 +1581,24 @@ except Exception as e:
 logger.info("---Start Zero Export---")
 
 while True:
+    socResult = session.get(
+        'http://192.168.37.6:8093/v1/state/growatt.0.2276541.devices.CYF6CF4005.statusData.SOC').json()
+    soc = socResult['val']
+
+    socResult = session.get(
+        'http://192.168.37.6:8093/v1/state/growatt.0.2276541.devices.CYF6CF4005.historyLast.batteryTemperature').json()
+    bat_temperature = socResult['val']
+
+    json = session.get(
+        'http://192.168.37.6:8093/v1/state/growatt.0.2276541.devices.CYF6CF4005.statusData.pdisCharge1').json()
+    discharge_watts = json['val'] * 1000.0
+
+    json = session.get(
+        'http://192.168.37.6:8093/v1/state/growatt.0.2276541.devices.CYF6CF4005.statusData.chargePower').json()
+    chargePower = json['val'] * 1000.0
+
     CONFIG_PROVIDER.update()
-    PublishConfigState()
+    publish_config_state()
     on_grid_usage_jump_to_limit_percent = CONFIG_PROVIDER.on_grid_usage_jump_to_limit_percent()
     on_grid_feed_fast_limit_decrease = CONFIG_PROVIDER.on_grid_feed_fast_limit_decrease()    
     powermeter_target_point = CONFIG_PROVIDER.get_powermeter_target_point()
@@ -1588,81 +1612,144 @@ while True:
                 powermeter_max_point))
 
     try:
-        PreviousLimitSetpoint = newLimitSetpoint
-        if GetHoymilesAvailable() and GetCheckBattery():
+        hoymiles_actual_power = get_hoymiles_actual_power()
+        previous_limit_setpoint = new_limit_setpoint
+        if get_hoymiles_available() and get_check_battery():
             if LOG_TEMPERATURE:
-                GetHoymilesTemperature()
-            for x in range(CastToInt(LOOP_INTERVAL_IN_SECONDS / POLL_INTERVAL_IN_SECONDS)):
-                powermeterWatts = GetPowermeterWatts()
-                if powermeterWatts > powermeter_max_point:
+                get_hoymiles_temperature()
+            for x in range(cast_to_int(LOOP_INTERVAL_IN_SECONDS / POLL_INTERVAL_IN_SECONDS)):
+                powermeter_watts = get_powermeter_watts()
+                if powermeter_watts > powermeter_max_point:
                     if on_grid_usage_jump_to_limit_percent > 0:
-                        newLimitSetpoint = CastToInt(GetMaxInverterWattFromAllInverters() * on_grid_usage_jump_to_limit_percent / 100)
-                        if (newLimitSetpoint <= PreviousLimitSetpoint) and (on_grid_usage_jump_to_limit_percent != 100):
-                            newLimitSetpoint = PreviousLimitSetpoint + powermeterWatts - powermeter_target_point
+                        new_limit_setpoint = cast_to_int(get_max_inverter_watt_from_all_inverters() * on_grid_usage_jump_to_limit_percent / 100)
+                        if (new_limit_setpoint <= previous_limit_setpoint) and (on_grid_usage_jump_to_limit_percent != 100):
+                            new_limit_setpoint = previous_limit_setpoint + powermeter_watts - powermeter_target_point
                     else:
-                        newLimitSetpoint = PreviousLimitSetpoint + powermeterWatts - powermeter_target_point
-                    newLimitSetpoint = ApplyLimitsToSetpoint(newLimitSetpoint)
-                    SetLimit(newLimitSetpoint)
-                    RemainingDelay = CastToInt((LOOP_INTERVAL_IN_SECONDS / POLL_INTERVAL_IN_SECONDS - x) * POLL_INTERVAL_IN_SECONDS)
-                    if RemainingDelay > 0:
-                        time.sleep(RemainingDelay)
+                        new_limit_setpoint = previous_limit_setpoint + powermeter_watts - powermeter_target_point
+                    new_limit_setpoint = check_and_apply_upper_and_lower_limits(new_limit_setpoint)
+                    set_limit(new_limit_setpoint)
+                    remaining_delay = cast_to_int((LOOP_INTERVAL_IN_SECONDS / POLL_INTERVAL_IN_SECONDS - x) * POLL_INTERVAL_IN_SECONDS)
+                    if remaining_delay > 0:
+                        time.sleep(remaining_delay)
                         break
-                elif (powermeterWatts < powermeter_min_point) and on_grid_feed_fast_limit_decrease:
-                    newLimitSetpoint = PreviousLimitSetpoint + powermeterWatts - powermeter_target_point
-                    newLimitSetpoint = ApplyLimitsToSetpoint(newLimitSetpoint)
-                    SetLimit(newLimitSetpoint)
-                    RemainingDelay = CastToInt((LOOP_INTERVAL_IN_SECONDS / POLL_INTERVAL_IN_SECONDS - x) * POLL_INTERVAL_IN_SECONDS)
-                    if RemainingDelay > 0:
-                        time.sleep(RemainingDelay)
+                elif (powermeter_watts < powermeter_min_point) and on_grid_feed_fast_limit_decrease:
+                    new_limit_setpoint = previous_limit_setpoint + powermeter_watts - powermeter_target_point
+                    new_limit_setpoint = check_and_apply_upper_and_lower_limits(new_limit_setpoint)
+                    set_limit(new_limit_setpoint)
+                    remaining_delay = cast_to_int((LOOP_INTERVAL_IN_SECONDS / POLL_INTERVAL_IN_SECONDS - x) * POLL_INTERVAL_IN_SECONDS)
+                    if remaining_delay > 0:
+                        time.sleep(remaining_delay)
                         break
                 else:
                     time.sleep(POLL_INTERVAL_IN_SECONDS)
 
             if MAX_DIFFERENCE_BETWEEN_LIMIT_AND_OUTPUTPOWER != 100:
-                CutLimit = CutLimitToProduction(newLimitSetpoint)
-                if CutLimit != newLimitSetpoint:
-                    newLimitSetpoint = CutLimit
-                    PreviousLimitSetpoint = newLimitSetpoint
+                cut_limit = cut_limit_to_production(new_limit_setpoint)
+                if cut_limit != new_limit_setpoint:
+                    new_limit_setpoint = cut_limit
+                    previous_limit_setpoint = new_limit_setpoint
 
-            if powermeterWatts > powermeter_max_point:
+            if powermeter_watts > powermeter_max_point:
                 continue
 
             # producing too much power: reduce limit
-            if powermeterWatts < (powermeter_target_point - powermeter_tolerance):
-                if PreviousLimitSetpoint >= GetMaxWattFromAllInverters():
-                    hoymilesActualPower = GetHoymilesActualPower()
-                    newLimitSetpoint = hoymilesActualPower + powermeterWatts - powermeter_target_point
-                    LimitDifference = abs(hoymilesActualPower - newLimitSetpoint)
-                    if LimitDifference > SLOW_APPROX_LIMIT:
-                        newLimitSetpoint = newLimitSetpoint + (LimitDifference * SLOW_APPROX_FACTOR_IN_PERCENT / 100)
-                    if newLimitSetpoint > hoymilesActualPower:
-                        newLimitSetpoint = hoymilesActualPower
+            if powermeter_watts < (powermeter_target_point - powermeter_tolerance):
+                if previous_limit_setpoint >= get_max_watt_from_all_inverters():
+                    new_limit_setpoint = hoymiles_actual_power + powermeter_watts - powermeter_target_point
+                    limit_difference = abs(hoymiles_actual_power - new_limit_setpoint)
+                    if limit_difference > SLOW_APPROX_LIMIT:
+                        new_limit_setpoint = new_limit_setpoint + (limit_difference * SLOW_APPROX_FACTOR_IN_PERCENT / 100)
+                    if new_limit_setpoint > hoymiles_actual_power:
+                        new_limit_setpoint = hoymiles_actual_power
                     logger.info("overproducing: reduce limit based on actual power")
                 else:
-                    newLimitSetpoint = PreviousLimitSetpoint + powermeterWatts - powermeter_target_point
-                    # check if it is necessary to approximate to the setpoint with some more passes. this reduce overshoot
-                    LimitDifference = abs(PreviousLimitSetpoint - newLimitSetpoint)
-                    if LimitDifference > SLOW_APPROX_LIMIT:
+                    new_limit_setpoint = previous_limit_setpoint + powermeter_watts - powermeter_target_point
+                    # check if it is necessary to approximate to the setpoint with some more passes. this reduces overshoot
+                    limit_difference = abs(previous_limit_setpoint - new_limit_setpoint)
+                    if limit_difference > SLOW_APPROX_LIMIT:
                         logger.info("overproducing: reduce limit based on previous limit setpoint by approximation")
-                        newLimitSetpoint = newLimitSetpoint + (LimitDifference * SLOW_APPROX_FACTOR_IN_PERCENT / 100)
+                        new_limit_setpoint = new_limit_setpoint + (limit_difference * SLOW_APPROX_FACTOR_IN_PERCENT / 100)
                     else:
                         logger.info("overproducing: reduce limit based on previous limit setpoint")
 
             # producing too little power: increase limit
-            elif powermeterWatts > (powermeter_target_point + powermeter_tolerance):
-                if PreviousLimitSetpoint < GetMaxWattFromAllInverters():
-                    newLimitSetpoint = PreviousLimitSetpoint + powermeterWatts - powermeter_target_point
+            elif powermeter_watts > (powermeter_target_point + powermeter_tolerance):
+                if previous_limit_setpoint < get_max_watt_from_all_inverters():
+                    new_limit_setpoint = previous_limit_setpoint + powermeter_watts - powermeter_target_point
                     logger.info("Not enough energy producing: increasing limit")
                 else:
                     logger.info("Not enough energy producing: limit already at maximum")
 
+            # Check battery SoC and increase the limit, if necessary
+            total_rated_power = get_max_watt_from_all_inverters()
+            if discharge_watts > 0 and new_limit_setpoint < (total_rated_power - discharge_watts):
+                new_limit_setpoint = discharge_watts * 1.1 + hoymiles_actual_power
+                logger.warning(f'Increasing limit to current discharge plus margin: {new_limit_setpoint}W')
+            else:
+                logger.warning(f'Leaving set point at: {new_limit_setpoint}')
+
+            # In principle, we do not need to adjust limits before the battery is full;
+            # however, there might be a temperature limitation which is cared for below.
+            limit_active = True
+            if soc < MAX_UNLIMITED_CHARGE_SOC:
+                new_limit_setpoint = powermeter_watts + powermeter_tolerance
+                limit_active = False
+                set_hoymiles_power_status(0, True)
+                set_hoymiles_power_status(1, True)
+                set_hoymiles_power_status(2, True)
+            elif soc >= MAX_UNLIMITED_CHARGE_SOC and soc < 97:
+                set_hoymiles_power_status(0, False)
+                set_hoymiles_power_status(1, True)
+                set_hoymiles_power_status(2, True)
+            elif soc >= 97 and soc < 99:
+                set_hoymiles_power_status(0, False)
+                set_hoymiles_power_status(1, False)
+                set_hoymiles_power_status(2, True)
+            elif soc >= 99:
+                set_hoymiles_power_status(0, False)
+                set_hoymiles_power_status(1, False)
+                set_hoymiles_power_status(2, False)
+
+            # adjust the limit with battery temperature
+            temperature_degradation = True
+            if bat_temperature <= 0:
+                new_limit_setpoint = powermeter_watts
+            elif bat_temperature > 0 and bat_temperature <= 10.0:
+                new_limit_setpoint = powermeter_watts + 510
+            elif bat_temperature > 10 and bat_temperature <= 20.0:
+                new_limit_setpoint = powermeter_watts + 2100
+            elif bat_temperature > 20.0 and bat_temperature <= 25.0:
+                new_limit_setpoint = powermeter_watts + 3200
+            else:
+                temperature_degradation = False
+
             # check for upper and lower limits
-            newLimitSetpoint = ApplyLimitsToSetpoint(newLimitSetpoint)
+            new_limit_setpoint = check_and_apply_upper_and_lower_limits(new_limit_setpoint)
+
             # set new limit to inverter
-            SetLimit(newLimitSetpoint)
+            set_limit(new_limit_setpoint)
+
+            # Log to console and publish to MQTT
+            logger.info(f'Power Consumption  : {powermeter_watts}W')
+            logger.info(f'PV Production      : {hoymiles_actual_power}W')
+            logger.info(f'Battery Temperature: {bat_temperature}ºC')
+            logger.info(f'Battery SoC        : {soc}%')
+            logger.info(f'Total Rated Power  : {total_rated_power}W')
+            logger.info(f'Inverter Limit     : {new_limit_setpoint}W')
+            logger.info(f'Temp. Degradation? : {temperature_degradation}')
+            logger.info(f'Limit Active?      : {limit_active}')
+            if discharge_watts > 0:
+                logger.info(f'Discharge Rate     : {discharge_watts}W')
+            elif chargePower > 0:
+                logger.info(f'Charge Rate        : {chargePower}W')
+
+            publish_global_state('total_limit_w', new_limit_setpoint)
+            publish_global_state('total_rated_power_w', total_rated_power)
+            publish_global_state('battery_soc_percent', soc)
+            publish_global_state('battery_cell_temperature_c', bat_temperature)
         else:
-            if hasattr(SetLimit, "LastLimit"):
-                SetLimit.LastLimit = -1
+            if hasattr(set_limit, "LastLimit"):
+                set_limit.LastLimit = -1
             time.sleep(LOOP_INTERVAL_IN_SECONDS)
 
     except Exception as e:
@@ -1671,3 +1758,4 @@ while True:
         else:
             logger.error(e)
         time.sleep(LOOP_INTERVAL_IN_SECONDS)
+
