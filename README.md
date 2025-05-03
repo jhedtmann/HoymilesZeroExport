@@ -7,6 +7,9 @@ such as better modularisation, the use of classes etc. This is by no means criti
 
 If you have any additional suggestions, please feel free to add them to the issues list.
 
+Further reading:
+- https://peps.python.org/pep-0008/
+
 ## Introduction
 Hoymiles Zero Export is a Python script for managing the power of the Hoymiles inverters to reduce the amount of the generated power to the grid. Based on the current power output, the script can automatically adjust the export limit of the inverter, allowing for optimal energy management.
 
