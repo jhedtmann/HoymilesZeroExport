@@ -15,40 +15,40 @@ class ConfigProvider:
 
     def get_powermeter_target_point(self):
         """
-        The target power for powermeter in watts
+        The target power for metering in watts
         """
         pass
 
     def get_powermeter_max_point(self):
         """
-        The maximum power of your powermeter for the normal "regulation loop".
-        If your powermeter jumps over this point, the limit will be increased instantly. it is like a "super high priority limit change".
+        The maximum power of your metering for the normal "regulation loop".
+        If your metering jumps over this point, the limit will be increased instantly. it is like a "super high priority limit change".
         If you defined ON_GRID_USAGE_JUMP_TO_LIMIT_PERCENT > 0, then the limit will jump to the defined percent when reaching this point.
         """
         pass
     
     def get_powermeter_min_point(self):
         """
-        The minimum power of your powermeter for the normal "regulation loop".
-        if your powermeter jumps under this point and ON_GRID_FEED_FAST_LIMIT_DECREASE = true, the limit will be reduced instantly. it is like a "super high priority limit change".
+        The minimum power of your metering for the normal "regulation loop".
+        if your metering jumps under this point and ON_GRID_FEED_FAST_LIMIT_DECREASE = true, the limit will be reduced instantly. it is like a "super high priority limit change".
         """
         pass
 
     def on_grid_usage_jump_to_limit_percent(self):
         """
-        If the powermeter jumps over the max point, the limit will be increased to this percent of the powermeter value.
+        If the metering jumps over the max point, the limit will be increased to this percent of the metering value.
         """
         pass
     
     def on_grid_feed_fast_limit_decrease(self):
         """
-        If the powermeter falls below the min point, the limit will be immediatelly decreased.
+        If the metering falls below the min point, the limit will be immediatelly decreased.
         """
         pass    
 
     def get_powermeter_tolerance(self):
         """
-        The tolerance for the powermeter in watts. If the powermeter value is in the range of target_point - tolerance and target_point + tolerance, the limit will not be changed.
+        The tolerance for the metering in watts. If the metering value is in the range of target_point - tolerance and target_point + tolerance, the limit will not be changed.
         """
         pass
 

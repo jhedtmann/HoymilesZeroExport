@@ -18,25 +18,22 @@ __author__ = "Tobias Kraft"
 __contributors__ = "Jörg Hedtmann, <df3ei@db0kk.org>"
 __version__ = "1.112"
 
-import time
-import os
-import logging
-import sys
 import argparse
-import subprocess
-import json
+import logging
+import os
+import sys
+import time
 
-from requests.sessions import Session
-from requests.auth import HTTPBasicAuth
-from requests.auth import HTTPDigestAuth
-from requests.adapters import HTTPAdapter
-from urllib3.util import Retry
-from logging.handlers import TimedRotatingFileHandler
 from configparser import ConfigParser
+from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
-from packaging import version
 
-from ConfigProvider import ConfigFileConfigProvider, MqttHandler, ConfigProviderChain
+from requests.adapters import HTTPAdapter
+from requests.sessions import Session
+from urllib3.util import Retry
+
+from configuration.config_providers import ConfigFileConfigProvider, MqttHandler, ConfigProviderChain
+from utils.helper_functions import cast_to_int
 
 session = Session()
 logging.basicConfig(
@@ -85,100 +82,88 @@ if ENABLE_LOG_TO_FILE:
 
 logger.info('Log write to file: %s', ENABLE_LOG_TO_FILE)
 logger.info('Python Version: ' + sys.version)
+
 try:
     assert sys.version_info >= (3,8)
 except:
     logger.info('Error: your Python version is too old, this script requires version 3.8 or newer. Please update your Python.')
     sys.exit()
 
-def cast_to_int(pValueToCast):
-    try:
-        result = int(pValueToCast)
-        return result
-    except:
-        result = 0
-    try:
-        result = int(float(pValueToCast))
-        return result
-    except:
-        logger.error("Exception at CastToInt")
-        raise
-
-def set_limit(pLimit):
+def set_limit(p_limit):
     try:
         if not hasattr(set_limit, "LastLimit"):
             set_limit.LastLimit = cast_to_int(0)
         if not hasattr(set_limit, "LastLimitAck"):
             set_limit.LastLimitAck = bool(False)
-        if (set_limit.LastLimit == cast_to_int(pLimit)) and set_limit.LastLimitAck:
-            logger.info("Inverterlimit was already accepted at %s Watt", cast_to_int(pLimit))
-            CrossCheckLimit()
+        if (set_limit.LastLimit == cast_to_int(p_limit)) and set_limit.LastLimitAck:
+            logger.info("Inverterlimit was already accepted at %s Watt", cast_to_int(p_limit))
+            cross_check_limit()
             return
-        if (set_limit.LastLimit == cast_to_int(pLimit)) and not set_limit.LastLimitAck:
-            logger.info("Inverterlimit %s Watt was previously not accepted by at least one inverter, trying again...", cast_to_int(pLimit))
+        if (set_limit.LastLimit == cast_to_int(p_limit)) and not set_limit.LastLimitAck:
+            logger.info("Inverterlimit %s Watt was previously not accepted by at least one inverter, trying again...", cast_to_int(p_limit))
 
-        logger.info("setting new limit to %s Watt", cast_to_int(pLimit))
-        set_limit.LastLimit = cast_to_int(pLimit)
+        logger.info("setting new limit to %s Watt", cast_to_int(p_limit))
+        set_limit.LastLimit = cast_to_int(p_limit)
         set_limit.LastLimitAck = True
 
         min_watt_all_inverters = get_min_watt_from_all_inverters()
-        if (cast_to_int(pLimit) <= min_watt_all_inverters):
-            pLimit = min_watt_all_inverters # set only minWatt for every inv.
+        if (cast_to_int(p_limit) <= min_watt_all_inverters):
+            p_limit = min_watt_all_inverters # set only minWatt for every inv.
             publish_global_state("limit", min_watt_all_inverters)
         else:
-            publish_global_state("limit", cast_to_int(pLimit))
+            publish_global_state("limit", cast_to_int(p_limit))
 
-        RemainingLimit = cast_to_int(pLimit)
+        remaining_limit = cast_to_int(p_limit)
 
-        RemainingLimit -= get_min_watt_from_all_inverters()
+        remaining_limit -= get_min_watt_from_all_inverters()
 
         # Handle non-battery inverters first
-        if RemainingLimit >= GetMaxWattFromAllNonBatteryInverters() - GetMinWattFromAllNonBatteryInverters():
-            nonBatteryInvertersLimit = GetMaxWattFromAllNonBatteryInverters() - GetMinWattFromAllNonBatteryInverters()
+        if remaining_limit >= get_max_watt_from_all_non_battery_inverters() - get_min_watt_from_all_non_battery_inverters():
+            non_battery_inverters_limit = get_max_watt_from_all_non_battery_inverters() - get_min_watt_from_all_non_battery_inverters()
         else:
-            nonBatteryInvertersLimit = RemainingLimit
+            non_battery_inverters_limit = remaining_limit
 
         for i in range(INVERTER_COUNT):
             if not AVAILABLE[i] or HOY_BATTERY_MODE[i]:
                 continue
 
             # Calculate proportional limit for non-battery inverters
-            NewLimit = cast_to_int(nonBatteryInvertersLimit * (HOY_MAX_WATT[i] - GetMinWatt(i)) / (GetMaxWattFromAllNonBatteryInverters() - GetMinWattFromAllNonBatteryInverters()))
+            new_limit = cast_to_int(non_battery_inverters_limit * (HOY_MAX_WATT[i] - get_min_watt(i)) / (get_max_watt_from_all_non_battery_inverters() - get_min_watt_from_all_non_battery_inverters()))
 
-            NewLimit += GetMinWatt(i)
+            new_limit += get_min_watt(i)
 
             # Apply the calculated limit to the inverter
-            NewLimit = ApplyLimitsToSetpointInverter(i, NewLimit)
+            new_limit = apply_limits_to_setpoint_inverter(i, new_limit)
             if HOY_COMPENSATE_WATT_FACTOR[i] != 1:
-                logger.info('Ahoy: Inverter "%s": compensate Limit from %s Watt to %s Watt', NAME[i], cast_to_int(NewLimit), cast_to_int(NewLimit * HOY_COMPENSATE_WATT_FACTOR[i]))
-                NewLimit = cast_to_int(NewLimit * HOY_COMPENSATE_WATT_FACTOR[i])
-                NewLimit = ApplyLimitsToMaxInverterLimits(i, NewLimit)
+                logger.info('Ahoy: Inverter "%s": compensate Limit from %s Watt to %s Watt', NAME[i], cast_to_int(new_limit), cast_to_int(new_limit * HOY_COMPENSATE_WATT_FACTOR[i]))
+                new_limit = cast_to_int(new_limit * HOY_COMPENSATE_WATT_FACTOR[i])
+                new_limit = apply_limits_to_max_inverter_limits(i, new_limit)
 
-            if (NewLimit == cast_to_int(CURRENT_LIMIT[i])) and LASTLIMITACKNOWLEDGED[i]:
-                logger.info('Inverter "%s": Already at %s Watt', NAME[i], cast_to_int(NewLimit))
+            if (new_limit == cast_to_int(CURRENT_LIMIT[i])) and LASTLIMITACKNOWLEDGED[i]:
+                logger.info('Inverter "%s": Already at %s Watt', NAME[i], cast_to_int(new_limit))
                 continue
 
             LASTLIMITACKNOWLEDGED[i] = True
 
-            PublishInverterState(i, "limit", NewLimit)
-            DTU.SetLimit(i, NewLimit)
-            if not DTU.WaitForAck(i, SET_LIMIT_TIMEOUT_SECONDS):
+            publish_inverter_state(i, "limit", new_limit)
+            DTU.set_limit(i, new_limit)
+            if not DTU.wait_for_ack(i, SET_LIMIT_TIMEOUT_SECONDS):
                 set_limit.LastLimitAck = False
                 LASTLIMITACKNOWLEDGED[i] = False
 
-        # Adjust RemainingLimit based on what was assigned to non-battery inverters
-        RemainingLimit -= nonBatteryInvertersLimit
+        # Adjust the remaining limit based on what was assigned to non-battery inverters
+        remaining_limit -= non_battery_inverters_limit
 
         # Then handle battery inverters based on priority
         for j in range(1, 6):
-            batteryMaxWattSamePrio = GetMaxWattFromAllBatteryInvertersSamePrio(j)
+            batteryMaxWattSamePrio = get_max_watt_from_all_battery_inverters_same_prio(j)
             if batteryMaxWattSamePrio <= 0:
                 continue
 
-            if RemainingLimit >= batteryMaxWattSamePrio - GetMinWattFromAllBatteryInvertersWithSamePriority(j):
-                LimitPrio = batteryMaxWattSamePrio - GetMinWattFromAllBatteryInvertersWithSamePriority(j)
+            if remaining_limit >= batteryMaxWattSamePrio - get_min_watt_from_all_battery_inverters_with_same_priority(j):
+                LimitPrio = batteryMaxWattSamePrio - get_min_watt_from_all_battery_inverters_with_same_priority(j)
             else:
-                LimitPrio = RemainingLimit 
+                LimitPrio = remaining_limit
 
             for i in range(INVERTER_COUNT):
                 if (not HOY_BATTERY_MODE[i]):
@@ -189,34 +174,34 @@ def set_limit(pLimit):
                     continue
 
                 # Calculate proportional limit for battery inverters
-                NewLimit = cast_to_int(LimitPrio * (HOY_MAX_WATT[i] - GetMinWatt(i)) / (GetMaxWattFromAllBatteryInvertersSamePrio(j) - GetMinWattFromAllBatteryInvertersWithSamePriority(j)))
-                NewLimit += GetMinWatt(i)
+                new_limit = cast_to_int(LimitPrio * (HOY_MAX_WATT[i] - get_min_watt(i)) / (get_max_watt_from_all_battery_inverters_same_prio(j) - get_min_watt_from_all_battery_inverters_with_same_priority(j)))
+                new_limit += get_min_watt(i)
 
-                NewLimit = ApplyLimitsToSetpointInverter(i, NewLimit)
+                new_limit = apply_limits_to_setpoint_inverter(i, new_limit)
                 if HOY_COMPENSATE_WATT_FACTOR[i] != 1:
-                    logger.info('Ahoy: Inverter "%s": compensate Limit from %s Watt to %s Watt', NAME[i], cast_to_int(NewLimit), cast_to_int(NewLimit * HOY_COMPENSATE_WATT_FACTOR[i]))
-                    NewLimit = cast_to_int(NewLimit * HOY_COMPENSATE_WATT_FACTOR[i])
-                    NewLimit = ApplyLimitsToMaxInverterLimits(i, NewLimit)
+                    logger.info('Ahoy: Inverter "%s": compensate Limit from %s Watt to %s Watt', NAME[i], cast_to_int(new_limit), cast_to_int(new_limit * HOY_COMPENSATE_WATT_FACTOR[i]))
+                    new_limit = cast_to_int(new_limit * HOY_COMPENSATE_WATT_FACTOR[i])
+                    new_limit = apply_limits_to_max_inverter_limits(i, new_limit)
 
-                if (NewLimit == cast_to_int(CURRENT_LIMIT[i])) and LASTLIMITACKNOWLEDGED[i]:
-                    logger.info('Inverter "%s": Already at %s Watt', NAME[i], cast_to_int(NewLimit))
+                if (new_limit == cast_to_int(CURRENT_LIMIT[i])) and LASTLIMITACKNOWLEDGED[i]:
+                    logger.info('Inverter "%s": Already at %s Watt', NAME[i], cast_to_int(new_limit))
                     continue
 
                 LASTLIMITACKNOWLEDGED[i] = True
 
-                PublishInverterState(i, "limit", NewLimit)
-                DTU.SetLimit(i, NewLimit)
-                if not DTU.WaitForAck(i, SET_LIMIT_TIMEOUT_SECONDS):
+                publish_inverter_state(i, "limit", new_limit)
+                DTU.set_limit(i, new_limit)
+                if not DTU.wait_for_ack(i, SET_LIMIT_TIMEOUT_SECONDS):
                     set_limit.LastLimitAck = False
                     LASTLIMITACKNOWLEDGED[i] = False
 
-            RemainingLimit -= LimitPrio
+            remaining_limit -= LimitPrio
     except:
         logger.error("Exception at SetLimit")
         set_limit.LastLimitAck = False
         raise
 
-def ResetInverterData(pInverterId):
+def reset_inverter_data(pInverterId):
     attributes_to_delete = [
         "LastLimit",
         "LastLimitAck",
@@ -227,7 +212,7 @@ def ResetInverterData(pInverterId):
     ]
     target_objects = [
         set_limit,
-        GetHoymilesPanelMinVoltage,
+        get_hoymiles_panel_min_voltage,
     ]
     for target_object in target_objects:
         for attribute in attributes_to_delete:
@@ -250,12 +235,12 @@ def get_hoymiles_available():
         for i in range(INVERTER_COUNT):
             try:
                 WasAvail = AVAILABLE[i]
-                AVAILABLE[i] = ENABLED[i] and DTU.GetAvailable(i)
+                AVAILABLE[i] = ENABLED[i] and DTU.get_available(i)
                 if AVAILABLE[i]:
                     GetHoymilesAvailable = True
                     if not WasAvail:
-                        ResetInverterData(i)
-                        GetHoymilesInfo()
+                        reset_inverter_data(i)
+                        get_hoymiles_info()
             except Exception as e:
                 AVAILABLE[i] = False
                 logger.error("Exception at GetHoymilesAvailable, Inverter %s (%s) not reachable", i, NAME[i])
@@ -268,13 +253,13 @@ def get_hoymiles_available():
         logger.error('Exception at GetHoymilesAvailable')
         raise
 
-def GetHoymilesInfo():
+def get_hoymiles_info():
     try:
         for i in range(INVERTER_COUNT):
             try:
                 if not AVAILABLE[i]:
                     continue
-                DTU.GetInfo(i)
+                DTU.get_info(i)
             except Exception as e:
                 logger.error('Exception at GetHoymilesInfo, Inverter "%s" not reachable', NAME[i])
                 if hasattr(e, 'message'):
@@ -285,12 +270,12 @@ def GetHoymilesInfo():
         logger.error("Exception at GetHoymilesInfo")
         raise
 
-def GetHoymilesPanelMinVoltage(pInverterId):
+def get_hoymiles_panel_min_voltage(pInverterId):
     try:
         if not AVAILABLE[pInverterId]:
             return 0
         
-        HOY_PANEL_MIN_VOLTAGE_HISTORY_LIST[pInverterId].append(DTU.GetPanelMinVoltage(pInverterId))
+        HOY_PANEL_MIN_VOLTAGE_HISTORY_LIST[pInverterId].append(DTU.get_panel_min_voltage(pInverterId))
         
         # calculate mean over last x values
         if len(HOY_PANEL_MIN_VOLTAGE_HISTORY_LIST[pInverterId]) > HOY_BATTERY_AVERAGE_CNT[pInverterId]:
@@ -310,15 +295,15 @@ def set_hoymiles_power_status(pInverterId, pActive):
             return
         if SET_POWERSTATUS_CNT > 0:
             if not hasattr(set_hoymiles_power_status, "LastPowerStatus"):
-                set_hoymiles_power_status.LastPowerStatus = []
-                set_hoymiles_power_status.LastPowerStatus = [False for i in range(INVERTER_COUNT)]
+                set_hoymiles_power_status.last_power_status = []
+                set_hoymiles_power_status.last_power_status = [False for i in range(INVERTER_COUNT)]
             if not hasattr(set_hoymiles_power_status, "SamePowerStatusCnt"):
                 set_hoymiles_power_status.SamePowerStatusCnt = []
                 set_hoymiles_power_status.SamePowerStatusCnt = [0 for i in range(INVERTER_COUNT)]
-            if set_hoymiles_power_status.LastPowerStatus[pInverterId] == pActive:
+            if set_hoymiles_power_status.last_power_status[pInverterId] == pActive:
                 set_hoymiles_power_status.SamePowerStatusCnt[pInverterId] = set_hoymiles_power_status.SamePowerStatusCnt[pInverterId] + 1
             else:
-                set_hoymiles_power_status.LastPowerStatus[pInverterId] = pActive
+                set_hoymiles_power_status.last_power_status[pInverterId] = pActive
                 set_hoymiles_power_status.SamePowerStatusCnt[pInverterId] = 0
             if set_hoymiles_power_status.SamePowerStatusCnt[pInverterId] > SET_POWERSTATUS_CNT:
                 if pActive:
@@ -326,21 +311,11 @@ def set_hoymiles_power_status(pInverterId, pActive):
                 else:
                     logger.info("Retry Counter exceeded: Inverter PowerStatus already OFF")
                 return
-        DTU.SetPowerStatus(pInverterId, pActive)
+        DTU.set_power_status(pInverterId, pActive)
         time.sleep(SET_POWER_STATUS_DELAY_IN_SECONDS)
     except:
         logger.error("Exception at SetHoymilesPowerStatus")
         raise
-    
-def GetNumberArray(pExcludedPanels):
-    lclExcludedPanelsList = pExcludedPanels.split(',')
-    result = []
-    for number_str in lclExcludedPanelsList:
-        if number_str == '':
-            continue
-        number = int(number_str.strip())
-        result.append(number)
-    return result
 
 def get_check_battery():
     try:
@@ -352,7 +327,7 @@ def get_check_battery():
                 if not HOY_BATTERY_MODE[i]:
                     result = True
                     continue
-                minVoltage = GetHoymilesPanelMinVoltage(i)
+                minVoltage = get_hoymiles_panel_min_voltage(i)
 
                 if minVoltage <= HOY_BATTERY_THRESHOLD_OFF_LIMIT_IN_V[i]:
                     set_hoymiles_power_status(i, False)
@@ -367,8 +342,8 @@ def get_check_battery():
                 elif minVoltage >= HOY_BATTERY_THRESHOLD_ON_LIMIT_IN_V[i]:
                     set_hoymiles_power_status(i, True)
                     if not HOY_BATTERY_GOOD_VOLTAGE[i]:
-                        DTU.SetLimit(i, GetMinWatt(i))
-                        DTU.WaitForAck(i, SET_LIMIT_TIMEOUT_SECONDS)
+                        DTU.set_limit(i, get_min_watt(i))
+                        DTU.wait_for_ack(i, SET_LIMIT_TIMEOUT_SECONDS)
                         set_limit.LastLimit = -1
                     HOY_BATTERY_GOOD_VOLTAGE[i] = True
                     if (minVoltage >= HOY_BATTERY_THRESHOLD_NORMAL_LIMIT_IN_V[i]) and (HOY_MAX_WATT[i] != CONFIG_PROVIDER.get_normal_wattage(i)):
@@ -393,7 +368,7 @@ def get_hoymiles_temperature():
     try:
         for i in range(INVERTER_COUNT):
             try:
-                DTU.GetTemperature(i)
+                DTU.get_temperature(i)
             except:
                 logger.error("Exception at GetHoymilesTemperature, Inverter %s not reachable", i)
     except:
@@ -403,7 +378,7 @@ def get_hoymiles_temperature():
 def get_hoymiles_actual_power():
     try:
         try:
-            Watts = abs(INTERMEDIATE_POWERMETER.GetPowermeterWatts())
+            Watts = abs(INTERMEDIATE_POWERMETER.get_powermeter_watts())
             logger.info(f"intermediate meter {INTERMEDIATE_POWERMETER.__class__.__name__}: {Watts} Watt")
             return Watts
         except Exception as e:
@@ -413,7 +388,7 @@ def get_hoymiles_actual_power():
             else:
                 logger.error(e)
             logger.error("try reading actual power from DTU:")
-            Watts = DTU.GetPowermeterWatts()
+            Watts = DTU.get_powermeter_watts()
             logger.info(f"intermediate meter {DTU.__class__.__name__}: {Watts} Watt")
     except:
         logger.error("Exception at GetHoymilesActualPower")
@@ -423,8 +398,8 @@ def get_hoymiles_actual_power():
 
 def get_powermeter_watts():
     try:
-        Watts = POWERMETER.GetPowermeterWatts()
-        logger.info(f"powermeter {POWERMETER.__class__.__name__}: {Watts} Watt")
+        Watts = POWERMETER.get_powermeter_watts()
+        logger.info(f"metering {POWERMETER.__class__.__name__}: {Watts} Watt")
         return Watts
     except:
         logger.error("Exception at GetPowermeterWatts")
@@ -432,7 +407,7 @@ def get_powermeter_watts():
             set_limit(0)        
         raise
 
-def GetMinWatt(pInverter: int):
+def get_min_watt(pInverter: int):
     min_watt_percent = CONFIG_PROVIDER.get_min_wattage_in_percent(pInverter)
     return int(HOY_INVERTER_WATT[pInverter] * min_watt_percent / 100)
 
@@ -452,30 +427,30 @@ def check_and_apply_upper_and_lower_limits(pSetpoint):
         pSetpoint = get_min_watt_from_all_inverters()
     return pSetpoint
 
-def ApplyLimitsToSetpointInverter(pInverter, pSetpoint):
+def apply_limits_to_setpoint_inverter(pInverter, pSetpoint):
     if pSetpoint > HOY_MAX_WATT[pInverter]:
         pSetpoint = HOY_MAX_WATT[pInverter]
-    if pSetpoint < GetMinWatt(pInverter):
-        pSetpoint = GetMinWatt(pInverter)
+    if pSetpoint < get_min_watt(pInverter):
+        pSetpoint = get_min_watt(pInverter)
     return pSetpoint
 
-def ApplyLimitsToMaxInverterLimits(pInverter, pSetpoint):
+def apply_limits_to_max_inverter_limits(pInverter, pSetpoint):
     if pSetpoint > HOY_INVERTER_WATT[pInverter]:
         pSetpoint = HOY_INVERTER_WATT[pInverter]
-    if pSetpoint < GetMinWatt(pInverter):
-        pSetpoint = GetMinWatt(pInverter)
+    if pSetpoint < get_min_watt(pInverter):
+        pSetpoint = get_min_watt(pInverter)
     return pSetpoint
 
-def CrossCheckLimit():
+def cross_check_limit():
     try:
         for i in range(INVERTER_COUNT):
             if AVAILABLE[i]:
-                DTULimitInW = DTU.GetActualLimitInW(i)
+                DTULimitInW = DTU.get_actual_limit_in_w(i)
                 LimitMax = float(CURRENT_LIMIT[i] + HOY_INVERTER_WATT[i] * 0.05)
                 LimitMin = float(CURRENT_LIMIT[i] - HOY_INVERTER_WATT[i] * 0.05)
                 if not (min(LimitMax, LimitMin) < DTULimitInW < max(LimitMax, LimitMin)):
                     logger.info('CrossCheckLimit: DTU ( %s ) <> SetLimit ( %s ). Resend limit to DTU', "{:.1f}".format(DTULimitInW), "{:.1f}".format(CURRENT_LIMIT[i]))
-                    DTU.SetLimit(i, CURRENT_LIMIT[i])
+                    DTU.set_limit(i, CURRENT_LIMIT[i])
     except:
         logger.error("Exception at CrossCheckLimit")
         raise
@@ -489,7 +464,7 @@ def get_max_watt_from_all_inverters():
         maxWatt = maxWatt + HOY_MAX_WATT[i]
     return maxWatt
 
-def GetMaxWattFromAllBatteryInvertersSamePrio(pPriority):
+def get_max_watt_from_all_battery_inverters_same_prio(pPriority):
     return sum(
         HOY_MAX_WATT[i] for i in range(INVERTER_COUNT)
         if AVAILABLE[i] and HOY_BATTERY_GOOD_VOLTAGE[i] and HOY_BATTERY_MODE[i] and CONFIG_PROVIDER.get_battery_priority(i) == pPriority
@@ -504,7 +479,7 @@ def get_max_inverter_watt_from_all_inverters():
         maxWatt = maxWatt + HOY_INVERTER_WATT[i]
     return maxWatt
 
-def GetMaxWattFromAllNonBatteryInverters():
+def get_max_watt_from_all_non_battery_inverters():
     return sum(
         HOY_MAX_WATT[i] for i in range(INVERTER_COUNT)
         if AVAILABLE[i] and not HOY_BATTERY_MODE[i] and HOY_BATTERY_GOOD_VOLTAGE[i]
@@ -515,31 +490,31 @@ def get_min_watt_from_all_inverters():
     for i in range(INVERTER_COUNT):
         if (not AVAILABLE[i]) or (not HOY_BATTERY_GOOD_VOLTAGE[i]):
             continue
-        minWatt = minWatt + GetMinWatt(i)
+        minWatt = minWatt + get_min_watt(i)
     return minWatt
 
-def GetMinWattFromAllNonBatteryInverters():
+def get_min_watt_from_all_non_battery_inverters():
     minWatt = 0
     for i in range(INVERTER_COUNT):
         if (not AVAILABLE[i]) or (HOY_BATTERY_MODE[i]) or (not HOY_BATTERY_GOOD_VOLTAGE[i]):
             continue
-        minWatt = minWatt + GetMinWatt(i)
+        minWatt = minWatt + get_min_watt(i)
     return minWatt
 
-def GetMinWattFromAllBatteryInverters():
+def get_min_watt_from_all_battery_inverters():
     minWatt = 0
     for i in range(INVERTER_COUNT):
         if (not AVAILABLE[i]) or (not HOY_BATTERY_MODE[i]) or (not HOY_BATTERY_GOOD_VOLTAGE[i]):
             continue
-        minWatt = minWatt + GetMinWatt(i)
+        minWatt = minWatt + get_min_watt(i)
     return minWatt  
 
-def GetMinWattFromAllBatteryInvertersWithSamePriority(pPriority):
+def get_min_watt_from_all_battery_inverters_with_same_priority(pPriority):
     minWatt = 0
     for i in range(INVERTER_COUNT):
         if (not AVAILABLE[i]) or (not HOY_BATTERY_MODE[i]) or (not HOY_BATTERY_GOOD_VOLTAGE[i]) or (CONFIG_PROVIDER.get_battery_priority(i) != pPriority):
             continue
-        minWatt = minWatt + GetMinWatt(i)
+        minWatt = minWatt + get_min_watt(i)
     return minWatt  
 
 def publish_config_state():
@@ -563,599 +538,10 @@ def publish_global_state(state_name, state_value):
         return
     MQTT.publish_state(state_name, state_value)
 
-def PublishInverterState(inverter_idx, state_name, state_value):
+def publish_inverter_state(inverter_idx, state_name, state_value):
     if MQTT is None:
         return
     MQTT.publish_inverter_state(inverter_idx, state_name, state_value)
-
-class Powermeter:
-    def GetPowermeterWatts(self) -> int:
-        raise NotImplementedError()
-
-class Tasmota(Powermeter):
-    def __init__(self, ip: str, user: str, password: str, json_status: str, json_payload_mqtt_prefix: str, json_power_mqtt_label: str, json_power_input_mqtt_label: str, json_power_output_mqtt_label: str, json_power_calculate: bool):
-        self.ip = ip
-        self.user = user
-        self.password = password
-        self.json_status = json_status
-        self.json_payload_mqtt_prefix = json_payload_mqtt_prefix
-        self.json_power_mqtt_label = json_power_mqtt_label
-        self.json_power_input_mqtt_label = json_power_input_mqtt_label
-        self.json_power_output_mqtt_label = json_power_output_mqtt_label
-        self.json_power_calculate = json_power_calculate
-
-    def GetJson(self, path):      
-        url = f'http://{self.ip}{path}'
-        return session.get(url, timeout=10).json()
-
-    def GetPowermeterWatts(self):
-        if not self.user:
-            ParsedData = self.GetJson('/cm?cmnd=status%2010')
-        else:
-            ParsedData = self.GetJson(f'/cm?user={self.user}&password={self.password}&cmnd=status%2010')
-        if not self.json_power_calculate:
-            return cast_to_int(ParsedData[self.json_status][self.json_payload_mqtt_prefix][self.json_power_mqtt_label])
-        else:
-            input = ParsedData[self.json_status][self.json_payload_mqtt_prefix][self.json_power_input_mqtt_label]
-            ouput = ParsedData[self.json_status][self.json_payload_mqtt_prefix][self.json_power_output_mqtt_label]
-            return cast_to_int(input - ouput)
-
-class Shelly(Powermeter):
-    def __init__(self, ip: str, user: str, password: str, emeterindex: str):
-        self.ip = ip
-        self.user = user
-        self.password = password
-        self.emeterindex = emeterindex
-
-    def GetJson(self, path):
-        url = f'http://{self.ip}{path}'
-        headers = {"content-type": "application/json"}
-        return session.get(url, headers=headers, auth=(self.user, self.password), timeout=10).json()
-
-    def GetRpcJson(self, path):
-        url = f'http://{self.ip}/rpc{path}'
-        headers = {"content-type": "application/json"}
-        return session.get(url, headers=headers, auth=HTTPDigestAuth(self.user, self.password), timeout=10).json()
-
-    def GetPowermeterWatts(self) -> int:
-        raise NotImplementedError()
-
-class Shelly1PM(Shelly):
-    def GetPowermeterWatts(self):
-        return cast_to_int(self.GetJson('/status')['meters'][0]['power'])
-
-class ShellyPlus1PM(Shelly):
-    def GetPowermeterWatts(self):
-        return cast_to_int(self.GetRpcJson('/Switch.GetStatus?id=0')['apower'])
-
-class ShellyEM(Shelly):
-    def GetPowermeterWatts(self):
-        if self.emeterindex:
-            return cast_to_int(self.GetJson(f'/emeter/{self.emeterindex}')['power'])
-        else:
-            return sum(cast_to_int(emeter['power']) for emeter in self.GetJson('/status')['emeters'])
-
-class Shelly3EM(Shelly):
-    def GetPowermeterWatts(self):
-        return cast_to_int(self.GetJson('/status')['total_power'])
-
-class Shelly3EMPro(Shelly):
-    def GetPowermeterWatts(self):
-        return cast_to_int(self.GetRpcJson('/EM.GetStatus?id=0')['total_act_power'])
-
-class ESPHome(Powermeter):
-    def __init__(self, ip: str, port: str, domain: str, id: str):
-        self.ip = ip
-        self.port = port
-        self.domain = domain
-        self.id = id
-
-    def GetJson(self, path):
-        url = f'http://{self.ip}:{self.port}{path}'
-        return session.get(url, timeout=10).json()
-
-    def GetPowermeterWatts(self):
-        ParsedData = self.GetJson(f'/{self.domain}/{self.id}')
-        return cast_to_int(ParsedData['value'])
-
-class Shrdzm(Powermeter):
-    def __init__(self, ip: str, user: str, password: str):
-        self.ip = ip
-        self.user = user
-        self.password = password
-
-    def GetJson(self, path):
-        url = f'http://{self.ip}{path}'
-        return session.get(url, timeout=10).json()
-
-    def GetPowermeterWatts(self):
-        ParsedData = self.GetJson(f'/getLastData?user={self.user}&password={self.password}')
-        return cast_to_int(cast_to_int(ParsedData['1.7.0']) - cast_to_int(ParsedData['2.7.0']))
-
-class Emlog(Powermeter):
-    def __init__(self, ip: str, meterindex: str, json_power_calculate: bool):
-        self.ip = ip
-        self.meterindex = meterindex
-        self.json_power_calculate = json_power_calculate
-
-    def GetJson(self, path):
-        url = f'http://{self.ip}{path}'
-        return session.get(url, timeout=10).json()
-
-    def GetPowermeterWatts(self):
-        ParsedData = self.GetJson(f'/pages/getinformation.php?heute&meterindex={self.meterindex}')
-        if not self.json_power_calculate:
-            return cast_to_int(ParsedData['Leistung170'])
-        else:
-            input = ParsedData['Leistung170']
-            ouput = ParsedData['Leistung270']
-            return cast_to_int(input - ouput)
-
-class IoBroker(Powermeter):
-    def __init__(self, ip: str, port: str, current_power_alias: str, power_calculate: bool, power_input_alias: str, power_output_alias: str):
-        self.ip = ip
-        self.port = port
-        self.current_power_alias = current_power_alias
-        self.power_calculate = power_calculate
-        self.power_input_alias = power_input_alias
-        self.power_output_alias = power_output_alias
-
-    def GetJson(self, path):
-        url = f'http://{self.ip}:{self.port}{path}'
-        return session.get(url, timeout=10).json()
-
-    def GetPowermeterWatts(self):
-        if not self.power_calculate:
-            ParsedData = self.GetJson(f'/getBulk/{self.current_power_alias}')
-            for item in ParsedData:
-                if item['id'] == self.current_power_alias:
-                    return cast_to_int(item['val'])
-        else:
-            ParsedData = self.GetJson(f'/getBulk/{self.power_input_alias},{self.power_output_alias}')
-            for item in ParsedData:
-                if item['id'] == self.power_input_alias:
-                    input = cast_to_int(item['val'])
-                if item['id'] == self.power_output_alias:
-                    output = cast_to_int(item['val'])
-            return cast_to_int(input - output)
-
-class HomeAssistant(Powermeter):
-    def __init__(self, ip: str, port: str, use_https: bool, access_token: str, current_power_entity: str, power_calculate: bool, power_input_alias: str, power_output_alias: str):
-        self.ip = ip
-        self.port = port
-        self.use_https = use_https
-        self.access_token = access_token
-        self.current_power_entity = current_power_entity
-        self.power_calculate = power_calculate
-        self.power_input_alias = power_input_alias
-        self.power_output_alias = power_output_alias
-
-    def GetJson(self, path):
-        if self.use_https:
-            url = f"https://{self.ip}:{self.port}{path}"
-        else:
-            url = f"http://{self.ip}:{self.port}{path}"
-        headers = {"Authorization": "Bearer " + self.access_token, "content-type": "application/json"}
-        return session.get(url, headers=headers, timeout=10).json()
-
-    def GetPowermeterWatts(self):
-        if not self.power_calculate:
-            ParsedData = self.GetJson(f"/api/states/{self.current_power_entity}")
-            return cast_to_int(ParsedData['state'])
-        else:
-            ParsedData = self.GetJson(f"/api/states/{self.power_input_alias}")
-            input = cast_to_int(ParsedData['state'])
-            ParsedData = self.GetJson(f"/api/states/{self.power_output_alias}")
-            output = cast_to_int(ParsedData['state'])
-            return cast_to_int(input - output)
-
-class VZLogger(Powermeter):
-    def __init__(self, ip: str, port: str, uuid: str):
-        self.ip = ip
-        self.port = port
-        self.uuid = uuid
-
-    def GetJson(self):
-        url = f"http://{self.ip}:{self.port}/{self.uuid}"
-        return session.get(url, timeout=10).json()
-
-    def GetPowermeterWatts(self):
-        return cast_to_int(self.GetJson()['data'][0]['tuples'][0][1])
-
-class AmisReader(Powermeter):
-    def __init__(self, ip: str):
-        self.ip = ip
-
-    def GetJson(self, path):
-        url = f'http://{self.ip}{path}'
-        return session.get(url, timeout=10).json()
-
-    def GetPowermeterWatts(self):
-        ParsedData = self.GetJson('/rest')
-        return cast_to_int(ParsedData['saldo'])
-    
-class DebugReader(Powermeter):
-    def GetPowermeterWatts(self):
-        return cast_to_int(input("Enter Powermeter Watts: "))
-
-class DTU(Powermeter):
-    def __init__(self, inverter_count: int):
-        self.inverter_count = inverter_count
-
-    def GetACPower(self, pInverterId: int):
-        raise NotImplementedError()
-
-    def GetPowermeterWatts(self):
-        return sum(self.GetACPower(pInverterId) for pInverterId in range(self.inverter_count) if AVAILABLE[pInverterId] and HOY_BATTERY_GOOD_VOLTAGE[pInverterId])
-    
-    def check_min_version(self):
-        raise NotImplementedError()
-    
-    def GetAvailable(self, pInverterId: int):
-        raise NotImplementedError()
-
-    def GetActualLimitInW(self, pInverterId: int):
-        raise NotImplementedError()
-
-    def GetInfo(self, pInverterId: int):
-        raise NotImplementedError()
-    
-    def GetTemperature(self, pInverterId: int):
-        raise NotImplementedError()
-    
-    def GetPanelMinVoltage(self, pInverterId: int):
-        raise NotImplementedError()
-    
-    def WaitForAck(self, pInverterId: int, pTimeoutInS: int):
-        raise NotImplementedError()
-    
-    def SetLimit(self, pInverterId: int, pLimit: int):
-        raise NotImplementedError()
-    
-    def SetPowerStatus(self, pInverterId: int, pActive: bool):
-        raise NotImplementedError()
-    
-class AhoyDTU(DTU):
-    def __init__(self, inverter_count: int, ip: str, password: str):
-        super().__init__(inverter_count)
-        self.ip = ip
-        self.password = password
-        self.Token = ''
-
-    def GetJson(self, path):
-        url = f'http://{self.ip}{path}'
-        # AhoyDTU sometimes returns literal 'null' instead of a valid json, so we retry a few times
-        data = None
-        retry_count = 3
-        while retry_count > 0 and data is None:
-            data = session.get(url, timeout=10).json()
-            retry_count -= 1
-        return data
-
-    def GetResponseJson(self, path, obj):
-        url = f'http://{self.ip}{path}'
-        return session.post(url, json = obj, timeout=10).json()
-
-    def GetACPower(self, pInverterId):
-        ParsedData = self.GetJson('/api/live')
-        ActualPower_index = ParsedData["ch0_fld_names"].index("P_AC")
-        ParsedData = self.GetJson(f'/api/inverter/id/{pInverterId}')
-        return cast_to_int(ParsedData["ch"][0][ActualPower_index])
-
-    def CheckMinVersion(self):
-        MinVersion = '0.8.80'
-        ParsedData = self.GetJson('/api/system')
-        try:
-            AhoyVersion = str((ParsedData["version"]))
-        except:
-            AhoyVersion = str((ParsedData["generic"]["version"]))
-        logger.info('Ahoy: Current Version: %s',AhoyVersion)
-        if version.parse(AhoyVersion) < version.parse(MinVersion):
-            logger.error('Error: Your AHOY Version is too old! Please update at least to Version %s - you can find the newest dev-releases here: https://github.com/lumapu/ahoy/actions',MinVersion)
-            quit()
-
-    def GetAvailable(self, pInverterId: int):
-        ParsedData = self.GetJson('/api/index')
-        Available = bool(ParsedData["inverter"][pInverterId]["is_avail"])
-        logger.info('Ahoy: Inverter "%s" Available: %s',NAME[pInverterId], Available)
-        return Available
-
-    def GetActualLimitInW(self, pInverterId: int):
-        ParsedData = self.GetJson(f'/api/inverter/id/{pInverterId}')
-        LimitInPercent = float(ParsedData['power_limit_read'])
-        LimitInW = HOY_INVERTER_WATT[pInverterId] * LimitInPercent / 100
-        return LimitInW
-
-    def GetInfo(self, pInverterId: int):
-        ParsedData = self.GetJson('/api/live')
-        temp_index = ParsedData["ch0_fld_names"].index("Temp")
-        
-        ParsedData = self.GetJson(f'/api/inverter/id/{pInverterId}')
-        SERIAL_NUMBER[pInverterId] = str(ParsedData['serial'])
-        NAME[pInverterId] = str(ParsedData['name'])
-        TEMPERATURE[pInverterId] = str(ParsedData["ch"][0][temp_index]) + ' degC'
-        logger.info('Ahoy: Inverter "%s" / serial number "%s" / temperature %s',NAME[pInverterId],SERIAL_NUMBER[pInverterId],TEMPERATURE[pInverterId])
-
-    def GetTemperature(self, pInverterId: int):
-        ParsedData = self.GetJson('/api/live')
-        temp_index = ParsedData["ch0_fld_names"].index("Temp")
-
-        ParsedData = self.GetJson(f'/api/inverter/id/{pInverterId}')
-        TEMPERATURE[pInverterId] = str(ParsedData["ch"][0][temp_index]) + ' degC'
-        logger.info('Ahoy: Inverter "%s" temperature: %s',NAME[pInverterId],TEMPERATURE[pInverterId])
-
-    def GetPanelMinVoltage(self, pInverterId: int):
-        ParsedData = self.GetJson('/api/live')
-        PanelVDC_index = ParsedData["fld_names"].index("U_DC")
-
-        ParsedData = self.GetJson(f'/api/inverter/id/{pInverterId}')
-        PanelVDC = []
-        ExcludedPanels = GetNumberArray(HOY_BATTERY_IGNORE_PANELS[pInverterId])
-        for i in range(1, len(ParsedData['ch']), 1):
-            if i not in ExcludedPanels:
-                PanelVDC.append(float(ParsedData['ch'][i][PanelVDC_index]))
-        minVdc = float('inf')
-        for i in range(len(PanelVDC)):
-            if (minVdc > PanelVDC[i]) and (PanelVDC[i] > 5):
-                minVdc = PanelVDC[i]
-        if minVdc == float('inf'):
-            minVdc = 0
-
-        # save last 5 min-values in list and return the "highest" value.
-        HOY_PANEL_VOLTAGE_LIST[pInverterId].append(minVdc)
-        if len(HOY_PANEL_VOLTAGE_LIST[pInverterId]) > 5:
-            HOY_PANEL_VOLTAGE_LIST[pInverterId].pop(0)
-        max_value = None
-        for num in HOY_PANEL_VOLTAGE_LIST[pInverterId]:
-            if (max_value is None or num > max_value):
-                max_value = num
-
-        logger.info('Lowest panel voltage inverter "%s": %s Volt',NAME[pInverterId],max_value)
-        return max_value
-    
-    def WaitForAck(self, pInverterId: int, pTimeoutInS: int):
-        try:
-            timeout = pTimeoutInS
-            timeout_start = time.time()
-            while time.time() < timeout_start + timeout:
-                time.sleep(0.5)
-                ParsedData = self.GetJson(f'/api/inverter/id/{pInverterId}')
-                ack = bool(ParsedData['power_limit_ack'])
-                if ack:
-                    break
-            if ack:
-                logger.info('Ahoy: Inverter "%s": Limit acknowledged', NAME[pInverterId])
-            else:
-                logger.info('Ahoy: Inverter "%s": Limit timeout!', NAME[pInverterId])
-            return ack
-        except Exception as e:
-            if hasattr(e, 'message'):
-                logger.error('Ahoy: Inverter "%s" WaitForAck: "%s"', NAME[pInverterId], e.message)
-            else:
-                logger.error('Ahoy: Inverter "%s" WaitForAck: "%s"', NAME[pInverterId], e)
-            return False
-    
-    def SetLimit(self, pInverterId: int, pLimit: int):
-        logger.info('Ahoy: Inverter "%s": setting new limit from %s Watt to %s Watt', NAME[pInverterId], cast_to_int(CURRENT_LIMIT[pInverterId]), cast_to_int(pLimit))
-        myobj = {'cmd': 'limit_nonpersistent_absolute', 'val': pLimit, "id": pInverterId, "token": self.Token}
-        response = self.GetResponseJson('/api/ctrl', myobj)
-        if response["success"] == False and response["error"] == "ERR_PROTECTED":
-            self.Authenticate()
-            self.SetLimit(pInverterId, pLimit)
-            return
-        if response["success"] == False:
-            raise Exception("Error: SetLimitAhoy Request error")
-        CURRENT_LIMIT[pInverterId] = pLimit
-
-    def SetPowerStatus(self, pInverterId: int, pActive: bool):
-        if pActive:
-            logger.info('Ahoy: Inverter "%s": Turn on',NAME[pInverterId])
-        else:
-            logger.info('Ahoy: Inverter "%s": Turn off',NAME[pInverterId])
-        myobj = {'cmd': 'power', 'val': cast_to_int(pActive == True), "id": pInverterId, "token": self.Token}
-        response = self.GetResponseJson('/api/ctrl', myobj)
-        if response["success"] == False and response["error"] == "ERR_PROTECTED":
-            self.Authenticate()
-            self.SetPowerStatus(pInverterId, pActive)
-            return
-        if response["success"] == False:
-            raise Exception("Error: SetPowerStatus Request error")
-
-    def Authenticate(self):
-        logger.info('Ahoy: Authenticating...')
-        myobj = {'auth': self.password}
-        response = self.GetResponseJson('/api/ctrl', myobj)
-        if response["success"] == False:
-            raise Exception("Error: Authenticate Request error")
-        self.Token = response["token"]     
-        logger.info('Ahoy: Authenticating successful, received Token: %s', self.Token)
-
-class OpenDTU(DTU):
-    def __init__(self, inverter_count: int, ip: str, user: str, password: str):
-        super().__init__(inverter_count)
-        self.ip = ip
-        self.user = user
-        self.password = password
-
-    def GetJson(self, path):
-        url = f'http://{self.ip}{path}'
-        return session.get(url, auth=HTTPBasicAuth(self.user, self.password), timeout=10).json()
-    
-    def GetResponseJson(self, path, sendStr):
-        url = f'http://{self.ip}{path}'
-        headers = {'Content-Type': 'application/x-www-form-urlencoded'}
-        return session.post(url=url, headers=headers, data=sendStr, auth=HTTPBasicAuth(self.user, self.password), timeout=10).json()
-
-    def GetACPower(self, pInverterId):
-        ParsedData = self.GetJson(f'/api/livedata/status?inv={SERIAL_NUMBER[pInverterId]}')
-        return cast_to_int(ParsedData['inverters'][0]['AC']['0']['Power']['v'])
-    
-    def CheckMinVersion(self):
-        MinVersion = 'v24.2.12'
-        ParsedData = self.GetJson('/api/system/status')
-        OpenDTUVersion = str((ParsedData["git_hash"]))
-        if ("-Database" in OpenDTUVersion): #trim string "v24.5.27-Database"
-            OpenDTUVersion = OpenDTUVersion.replace("-Database", "")
-        logger.info('OpenDTU: Current Version: %s',OpenDTUVersion)
-        if version.parse(OpenDTUVersion) < version.parse(MinVersion):
-            logger.error('Error: Your OpenDTU Version is too old! Please update at least to Version %s - you can find the newest dev-releases here: https://github.com/tbnobody/OpenDTU/actions',MinVersion)
-            quit()
-
-    def GetAvailable(self, pInverterId: int):
-        ParsedData = self.GetJson(f'/api/livedata/status?inv={SERIAL_NUMBER[pInverterId]}')
-        Reachable = bool(ParsedData['inverters'][0]["reachable"])
-        logger.info('OpenDTU: Inverter "%s" reachable: %s',NAME[pInverterId],Reachable)
-        return Reachable
-    
-    def GetActualLimitInW(self, pInverterId: int):
-        ParsedData = self.GetJson('/api/limit/status')
-        limit_relative = float(ParsedData[SERIAL_NUMBER[pInverterId]]['limit_relative'])
-        LimitInW = HOY_INVERTER_WATT[pInverterId] * limit_relative / 100
-        return LimitInW
-    
-    def GetInfo(self, pInverterId: int):
-        if SERIAL_NUMBER[pInverterId] == '':
-            ParsedData = self.GetJson('/api/livedata/status')
-            SERIAL_NUMBER[pInverterId] = str(ParsedData['inverters'][pInverterId]['serial'])
-
-        ParsedData = self.GetJson(f'/api/livedata/status?inv={SERIAL_NUMBER[pInverterId]}')
-        TEMPERATURE[pInverterId] = str(round(float((ParsedData['inverters'][0]['INV']['0']['Temperature']['v'])),1)) + ' degC'
-        NAME[pInverterId] = str(ParsedData['inverters'][0]['name'])
-        logger.info('OpenDTU: Inverter "%s" / serial number "%s" / temperature %s',NAME[pInverterId],SERIAL_NUMBER[pInverterId],TEMPERATURE[pInverterId])
-
-    def GetTemperature(self, pInverterId: int):
-        ParsedData = self.GetJson(f'/api/livedata/status?inv={SERIAL_NUMBER[pInverterId]}')
-        TEMPERATURE[pInverterId] = str(round(float((ParsedData['inverters'][0]['INV']['0']['Temperature']['v'])),1)) + ' degC'
-        logger.info('OpenDTU: Inverter "%s" temperature: %s',NAME[pInverterId],TEMPERATURE[pInverterId])
-
-    def GetPanelMinVoltage(self, pInverterId: int):
-        ParsedData = self.GetJson(f'/api/livedata/status?inv={SERIAL_NUMBER[pInverterId]}')
-        PanelVDC = []
-        ExcludedPanels = GetNumberArray(HOY_BATTERY_IGNORE_PANELS[pInverterId])
-        for i in range(len(ParsedData['inverters'][0]['DC'])):
-            if i not in ExcludedPanels:
-                PanelVDC.append(float(ParsedData['inverters'][0]['DC'][str(i)]['Voltage']['v']))
-        minVdc = float('inf')
-        for i in range(len(PanelVDC)):
-            if (minVdc > PanelVDC[i]) and (PanelVDC[i] > 5):
-                minVdc = PanelVDC[i]
-        if minVdc == float('inf'):
-            minVdc = 0
-
-        # save last 5 min-values in list and return the "highest" value.
-        HOY_PANEL_VOLTAGE_LIST[pInverterId].append(minVdc)
-        if len(HOY_PANEL_VOLTAGE_LIST[pInverterId]) > 5:
-            HOY_PANEL_VOLTAGE_LIST[pInverterId].pop(0)
-        max_value = None
-        for num in HOY_PANEL_VOLTAGE_LIST[pInverterId]:
-            if (max_value is None or num > max_value):
-                max_value = num
-
-        return max_value
-
-    def WaitForAck(self, pInverterId: int, pTimeoutInS: int):
-        try:
-            timeout = pTimeoutInS
-            timeout_start = time.time()
-            while time.time() < timeout_start + timeout:
-                time.sleep(0.5)
-                ParsedData = self.GetJson('/api/limit/status')
-                ack = (ParsedData[SERIAL_NUMBER[pInverterId]]['limit_set_status'] == 'Ok')
-                if ack:
-                    break
-            if ack:
-                logger.info('OpenDTU: Inverter "%s": Limit acknowledged', NAME[pInverterId])
-            else:
-                logger.info('OpenDTU: Inverter "%s": Limit timeout!', NAME[pInverterId])
-            return ack
-        except Exception as e:
-            if hasattr(e, 'message'):
-                logger.error('OpenDTU: Inverter "%s" WaitForAck: "%s"', NAME[pInverterId], e.message)
-            else:
-                logger.error('OpenDTU: Inverter "%s" WaitForAck: "%s"', NAME[pInverterId], e)
-            return False
-
-    def SetLimit(self, pInverterId: int, pLimit: int):
-        logger.info('OpenDTU: Inverter "%s": setting new limit from %s Watt to %s Watt', NAME[pInverterId], cast_to_int(CURRENT_LIMIT[pInverterId]), cast_to_int(pLimit))
-        relLimit = cast_to_int(pLimit / HOY_INVERTER_WATT[pInverterId] * 100)
-        mySendStr = f'''data={{"serial":"{SERIAL_NUMBER[pInverterId]}", "limit_type":1, "limit_value":{relLimit}}}'''
-        response = self.GetResponseJson('/api/limit/config', mySendStr)
-        if response['type'] != 'success':
-            raise Exception(f"Error: SetLimit error: {response['message']}")
-        CURRENT_LIMIT[pInverterId] = pLimit
-
-    def SetPowerStatus(self, pInverterId: int, pActive: bool):
-        if pActive:
-            logger.info('OpenDTU: Inverter "%s": Turn on',NAME[pInverterId])
-        else:
-            logger.info('OpenDTU: Inverter "%s": Turn off',NAME[pInverterId])
-
-        logger.debug(f'POWER: {pActive}')
-        mySendStr = f'''data={{"serial":"{SERIAL_NUMBER[pInverterId]}", "power":{str(pActive).lower()}}}'''
-        logger.info(mySendStr)
-        response = self.GetResponseJson('/api/power/config', mySendStr)
-        if response['type'] != 'success':
-            raise Exception(f"Error: SetPowerStatus error: {response['message']}")
-        
-class DebugDTU(DTU):
-    def __init__(self, inverter_count: int):
-        super().__init__(inverter_count)
-
-    def GetACPower(self, pInverterId):
-        return cast_to_int(input("Current AC-Power: "))
-
-    def CheckMinVersion(self):
-        return
-
-    def GetAvailable(self, pInverterId: int):
-        logger.info('Debug: Inverter "%s" Available: %s',NAME[pInverterId], True)
-        return True
-
-    def GetActualLimitInW(self, pInverterId: int):
-        return cast_to_int(input("Current InverterLimit: "))
-
-    def GetInfo(self, pInverterId: int):
-        SERIAL_NUMBER[pInverterId] = str(pInverterId)
-        NAME[pInverterId] = str(pInverterId)
-        TEMPERATURE[pInverterId] = '0 degC'
-        logger.info('Debug: Inverter "%s" / serial number "%s" / temperature %s',NAME[pInverterId],SERIAL_NUMBER[pInverterId],TEMPERATURE[pInverterId])
-
-    def GetTemperature(self, pInverterId: int):
-        TEMPERATURE[pInverterId] = 0
-        logger.info('Debug: Inverter "%s" temperature: %s',NAME[pInverterId],TEMPERATURE[pInverterId])
-
-    def GetPanelMinVoltage(self, pInverterId: int):
-        logger.info('Lowest panel voltage inverter "%s": %s Volt',NAME[pInverterId],90)
-        return 90
-    
-    def WaitForAck(self, pInverterId: int, pTimeoutInS: int):
-        return True
-    
-    def SetLimit(self, pInverterId: int, pLimit: int):
-        logger.info('Debug: Inverter "%s": setting new limit from %s Watt to %s Watt', NAME[pInverterId], cast_to_int(CURRENT_LIMIT[pInverterId]), cast_to_int(pLimit))
-        CURRENT_LIMIT[pInverterId] = pLimit
-
-    def SetPowerStatus(self, pInverterId: int, pActive: bool):
-        if pActive:
-            logger.info('Debug: Inverter "%s": Turn on',NAME[pInverterId])
-        else:
-            logger.info('Debug: Inverter "%s": Turn off',NAME[pInverterId])
-
-    def Authenticate(self):
-        logger.info('Debug: Authenticating...')
-        self.Token = '12345'   
-        logger.info('Debug: Authenticating successful, received Token: %s', self.Token)        
-
-class Script(Powermeter):
-    def __init__(self, file: str, ip: str, user: str, password: str):
-        self.file = file
-        self.ip = ip
-        self.user = user
-        self.password = password
-
-    def GetPowermeterWatts(self):
-        power = subprocess.check_output([self.file, self.ip, self.user, self.password])
-        return cast_to_int(power)
 
 def extract_json_value(data, path):
     from jsonpath_ng import parse
@@ -1165,78 +551,6 @@ def extract_json_value(data, path):
         return int(float(match[0].value))
     else:
         raise ValueError("No match found for the JSON path")
-
-class MqttPowermeter(Powermeter):
-    def __init__(
-        self,
-        broker: str,
-        port: int,
-        topic_incoming: str,
-        json_path_incoming: str = None,
-        topic_outgoing: str = None,
-        json_path_outgoing: str = None,
-        username: str = None,
-        password: str = None,
-    ):
-        self.broker = broker
-        self.port = port
-        self.topic_incoming = topic_incoming
-        self.json_path_incoming = json_path_incoming
-        self.topic_outgoing = topic_outgoing
-        self.json_path_outgoing = json_path_outgoing
-        self.username = username
-        self.password = password
-        self.value_incoming = None
-        self.value_outgoing = None
-
-        # Initialize MQTT client
-        import paho.mqtt.client as mqtt
-        self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-        if self.username and self.password:
-            self.client.username_pw_set(self.username, self.password)
-        self.client.on_connect = self.on_connect
-        self.client.on_message = self.on_message
-
-        # Connect to the broker
-        self.client.connect(self.broker, self.port)
-        self.client.loop_start()
-
-    def on_connect(self, client, userdata, flags, reason_code, properties):
-        logger.info(f"Connected with result code {reason_code}")
-        # Subscribe to the topics
-        client.subscribe(self.topic_incoming)
-        logger.info(f"Subscribed to topic {self.topic_incoming}")
-        if self.topic_outgoing and self.topic_outgoing != self.topic_incoming:
-            client.subscribe(self.topic_outgoing)
-            logger.info(f"Subscribed to topic {self.topic_outgoing}")
-
-    def on_message(self, client, userdata, msg):
-        payload = msg.payload.decode()
-        try:
-            data = json.loads(payload)
-            if msg.topic == self.topic_incoming:
-                self.value_incoming = extract_json_value(data, self.json_path_incoming) if self.json_path_incoming else int(float(payload))
-                logger.info('MQTT: Incoming power: %s Watt', self.value_incoming)
-            elif msg.topic == self.topic_outgoing:
-                self.value_outgoing = extract_json_value(data, self.json_path_outgoing) if self.json_path_outgoing else int(float(payload))
-                logger.info('MQTT: Outgoing power: %s Watt', self.value_outgoing)
-        except json.JSONDecodeError:
-            print("Failed to decode JSON")
-
-    def GetPowermeterWatts(self):
-        if self.value_incoming is None:
-            self.wait_for_message("incoming")
-        if self.topic_outgoing and self.value_outgoing is None:
-            self.wait_for_message("outgoing")
-
-        return self.value_incoming - (self.value_outgoing if self.value_outgoing is not None else 0)
-
-    def wait_for_message(self, message_type, timeout=5):
-        start_time = time.time()
-        while (message_type == "incoming" and self.value_incoming is None) or (message_type == "outgoing" and self.value_outgoing is None):
-            if time.time() - start_time > timeout:
-                raise TimeoutError(f"Timeout waiting for MQTT {message_type} message")
-            time.sleep(1)
 
 def CreatePowermeter() -> Powermeter:
     shelly_ip = config.get('SHELLY', 'SHELLY_IP')
@@ -1324,7 +638,7 @@ def CreatePowermeter() -> Powermeter:
     elif config.getboolean('SELECT_POWERMETER', 'USE_DEBUG_READER'):
         return DebugReader()    
     else:
-        raise Exception("Error: no powermeter defined!")
+        raise Exception("Error: no metering defined!")
 
 def CreateIntermediatePowermeter(dtu: DTU) -> Powermeter:
     shelly_ip = config.get('INTERMEDIATE_SHELLY', 'SHELLY_IP_INTERMEDIATE')

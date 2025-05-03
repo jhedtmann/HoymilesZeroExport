@@ -1,6 +1,6 @@
 #! /bin/sh
 
-# Script to read powermeter values from a Victron Multiplus II 
+# Script to read metering values from a Victron Multiplus II
 # Needs "mbpoll" (command line utility to communicate with ModBus slave) to be installed, e.g. "apt install mbpoll"
 # Usage: GetPowerFromVictronMultiplus <ip-address> [<username>] [<password>]
 
