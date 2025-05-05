@@ -17,6 +17,7 @@
 __author__ = "Tobias Kraft"
 __contributors__ = "Jörg Hedtmann, <df3ei@db0kk.org>"
 __version__ = "1.112"
+__branch__ = "extended"
 
 import argparse
 import logging
@@ -29,18 +30,18 @@ from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
 from requests.adapters import HTTPAdapter
-from requests.sessions import Session
 from urllib3.util import Retry
 
-from configuration.config_providers import ConfigFileConfigProvider, MqttHandler, ConfigProviderChain
-from utils.helper_functions import cast_to_int
+from configuration.config_providers import (
+    ConfigFileConfigProvider,
+    MqttHandler,
+    ConfigProviderChain
+)
+from GLOBALS import *
+from metering.powermeters import *
+from control.dtus import *
+from utils.helper_functions import *
 
-session = Session()
-logging.basicConfig(
-    format='%(asctime)s %(levelname)-8s %(message)s',
-    level=logging.INFO,
-    datefmt='%Y-%m-%d %H:%M:%S')
-logger = logging.getLogger()
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-c', '--config', help='Override configuration file path')
@@ -805,26 +806,7 @@ LOG_TEMPERATURE = config.getboolean('COMMON', 'LOG_TEMPERATURE')
 SET_INVERTER_TO_MIN_ON_POWERMETER_ERROR = config.getboolean('COMMON', 'SET_INVERTER_TO_MIN_ON_POWERMETER_ERROR', fallback=False)
 powermeter_target_point = config.getint('CONTROL', 'POWERMETER_TARGET_POINT')
 MAX_UNLIMITED_CHARGE_SOC = config.getint('CONTROL', 'MAX_UNLIMITED_CHARGE_SOC')
-SERIAL_NUMBER = []
-ENABLED = []
-NAME = []
-TEMPERATURE = []
-HOY_MAX_WATT = []
-HOY_INVERTER_WATT = []
-CURRENT_LIMIT = []
-AVAILABLE = []
-LASTLIMITACKNOWLEDGED = []
-HOY_BATTERY_GOOD_VOLTAGE = []
-HOY_COMPENSATE_WATT_FACTOR = []
-HOY_BATTERY_MODE = []
-HOY_BATTERY_THRESHOLD_OFF_LIMIT_IN_V = []
-HOY_BATTERY_THRESHOLD_REDUCE_LIMIT_IN_V = []
-HOY_BATTERY_THRESHOLD_NORMAL_LIMIT_IN_V = []
-HOY_BATTERY_THRESHOLD_ON_LIMIT_IN_V = []
-HOY_BATTERY_IGNORE_PANELS = []
-HOY_PANEL_VOLTAGE_LIST = []
-HOY_PANEL_MIN_VOLTAGE_HISTORY_LIST = []
-HOY_BATTERY_AVERAGE_CNT = []
+
 for i in range(INVERTER_COUNT):
     SERIAL_NUMBER.append(config.get('INVERTER_' + str(i + 1), 'SERIAL_NUMBER', fallback=''))
     ENABLED.append(config.getboolean('INVERTER_' + str(i + 1), 'ENABLED', fallback = True))

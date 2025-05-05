@@ -9,8 +9,7 @@ import time
 from packaging import version
 from requests.auth import HTTPBasicAuth
 
-from HoymilesZeroExport import AVAILABLE, HOY_BATTERY_GOOD_VOLTAGE, session, logger, NAME, HOY_INVERTER_WATT, \
-    SERIAL_NUMBER, TEMPERATURE, HOY_BATTERY_IGNORE_PANELS, HOY_PANEL_VOLTAGE_LIST, CURRENT_LIMIT
+from GLOBALS import *
 from metering.powermeters import Powermeter
 from utils.helper_functions import cast_to_int, get_number_array
 
