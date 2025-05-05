@@ -3,16 +3,17 @@
 # Ideally, there should not be any globals; this shall be a task for another day...
 
 import logging
-
-from requests import Session
-
-session = Session()
-
 logging.basicConfig(
     format='%(asctime)s %(levelname)-8s %(message)s',
     level=logging.INFO,
     datefmt='%Y-%m-%d %H:%M:%S')
 logger = logging.getLogger()
+
+from requests import Session
+session = Session()
+
+from configparser import ConfigParser
+config = ConfigParser()
 
 SERIAL_NUMBER = []
 ENABLED = []

@@ -20,12 +20,8 @@ __version__ = "1.112"
 __branch__ = "extended"
 
 import argparse
-import logging
 import os
 import sys
-import time
-
-from configparser import ConfigParser
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
@@ -37,19 +33,14 @@ from configuration.config_providers import (
     MqttHandler,
     ConfigProviderChain
 )
-from GLOBALS import *
-from metering.powermeters import *
-from control.dtus import *
+from utils.factories import *
 from utils.helper_functions import *
-
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-c', '--config', help='Override configuration file path')
 args = parser.parse_args()
 
 try:
-    config = ConfigParser()
-
     baseconfig = str(Path.joinpath(Path(__file__).parent.resolve(), "HoymilesZeroExport_Config.ini"))
     if args.config:
         config.read([baseconfig, args.config])
@@ -544,239 +535,49 @@ def publish_inverter_state(inverter_idx, state_name, state_value):
         return
     MQTT.publish_inverter_state(inverter_idx, state_name, state_value)
 
-def extract_json_value(data, path):
-    from jsonpath_ng import parse
-    jsonpath_expr = parse(path)
-    match = jsonpath_expr.find(data)
-    if match:
-        return int(float(match[0].value))
-    else:
-        raise ValueError("No match found for the JSON path")
+def load_config():
+    global MAX_RETRIES, RETRY_STATUS_CODES, RETRY_BACKOFF_FACTOR, DTU, POWERMETER, INTERMEDIATE_POWERMETER, INVERTER_COUNT, LOOP_INTERVAL_IN_SECONDS, SET_LIMIT_TIMEOUT_SECONDS, SET_POWER_STATUS_DELAY_IN_SECONDS, POLL_INTERVAL_IN_SECONDS, MAX_DIFFERENCE_BETWEEN_LIMIT_AND_OUTPUTPOWER, SET_POWERSTATUS_CNT, SLOW_APPROX_FACTOR_IN_PERCENT, LOG_TEMPERATURE, SET_INVERTER_TO_MIN_ON_POWERMETER_ERROR, powermeter_target_point, MAX_UNLIMITED_CHARGE_SOC
+    logger.info(
+        "read config file: " + str(Path.joinpath(Path(__file__).parent.resolve(), "HoymilesZeroExport_Config.ini")))
+    if args.config:
+        logger.info("read additional config file: " + args.config)
+    VERSION = config.get('VERSION', 'VERSION')
+    logger.info("Config file V %s", VERSION)
+    MAX_RETRIES = config.getint('COMMON', 'MAX_RETRIES', fallback=3)
+    RETRY_STATUS_CODES = config.get('COMMON', 'RETRY_STATUS_CODES', fallback='500,502,503,504')
+    RETRY_BACKOFF_FACTOR = config.getfloat('COMMON', 'RETRY_BACKOFF_FACTOR', fallback=0.1)
+    USE_AHOY = config.getboolean('SELECT_DTU', 'USE_AHOY')
+    USE_OPENDTU = config.getboolean('SELECT_DTU', 'USE_OPENDTU')
+    AHOY_IP = config.get('AHOY_DTU', 'AHOY_IP')
+    OPENDTU_IP = config.get('OPEN_DTU', 'OPENDTU_IP')
+    OPENDTU_USER = config.get('OPEN_DTU', 'OPENDTU_USER')
+    OPENDTU_PASS = config.get('OPEN_DTU', 'OPENDTU_PASS')
+    DTU = Factory.create_dtu()
+    POWERMETER = Factory.create_powermeter()
+    INTERMEDIATE_POWERMETER = Factory.create_intermediate_powermeter()
+    INVERTER_COUNT = config.getint('COMMON', 'INVERTER_COUNT')
+    LOOP_INTERVAL_IN_SECONDS = config.getint('COMMON', 'LOOP_INTERVAL_IN_SECONDS')
+    SET_LIMIT_TIMEOUT_SECONDS = config.getint('COMMON', 'SET_LIMIT_TIMEOUT_SECONDS')
+    SET_POWER_STATUS_DELAY_IN_SECONDS = config.getint('COMMON', 'SET_POWER_STATUS_DELAY_IN_SECONDS')
+    POLL_INTERVAL_IN_SECONDS = config.getint('COMMON', 'POLL_INTERVAL_IN_SECONDS')
+    MAX_DIFFERENCE_BETWEEN_LIMIT_AND_OUTPUTPOWER = config.getint('COMMON',
+                                                                 'MAX_DIFFERENCE_BETWEEN_LIMIT_AND_OUTPUTPOWER')
+    SET_POWERSTATUS_CNT = config.getint('COMMON', 'SET_POWERSTATUS_CNT')
+    SLOW_APPROX_FACTOR_IN_PERCENT = config.getint('COMMON', 'SLOW_APPROX_FACTOR_IN_PERCENT')
+    LOG_TEMPERATURE = config.getboolean('COMMON', 'LOG_TEMPERATURE')
+    SET_INVERTER_TO_MIN_ON_POWERMETER_ERROR = config.getboolean('COMMON', 'SET_INVERTER_TO_MIN_ON_POWERMETER_ERROR',
+                                                                fallback=False)
+    powermeter_target_point = config.getint('CONTROL', 'POWERMETER_TARGET_POINT')
+    MAX_UNLIMITED_CHARGE_SOC = config.getint('CONTROL', 'MAX_UNLIMITED_CHARGE_SOC')
 
-def CreatePowermeter() -> Powermeter:
-    shelly_ip = config.get('SHELLY', 'SHELLY_IP')
-    shelly_user = config.get('SHELLY', 'SHELLY_USER')
-    shelly_pass = config.get('SHELLY', 'SHELLY_PASS')
-    shelly_emeterindex = config.get('SHELLY', 'EMETER_INDEX')
-    if config.getboolean('SELECT_POWERMETER', 'USE_SHELLY_EM'):
-        return ShellyEM(shelly_ip, shelly_user, shelly_pass, shelly_emeterindex)
-    elif config.getboolean('SELECT_POWERMETER', 'USE_SHELLY_3EM'):
-        return Shelly3EM(shelly_ip, shelly_user, shelly_pass, shelly_emeterindex)
-    elif config.getboolean('SELECT_POWERMETER', 'USE_SHELLY_3EM_PRO'):
-        return Shelly3EMPro(shelly_ip, shelly_user, shelly_pass, shelly_emeterindex)
-    elif config.getboolean('SELECT_POWERMETER', 'USE_TASMOTA'):
-        return Tasmota(
-            config.get('TASMOTA', 'TASMOTA_IP'),
-            config.get('TASMOTA', 'TASMOTA_USER'),
-            config.get('TASMOTA', 'TASMOTA_PASS'),
-            config.get('TASMOTA', 'TASMOTA_JSON_STATUS'),
-            config.get('TASMOTA', 'TASMOTA_JSON_PAYLOAD_MQTT_PREFIX'),
-            config.get('TASMOTA', 'TASMOTA_JSON_POWER_MQTT_LABEL'),
-            config.get('TASMOTA', 'TASMOTA_JSON_POWER_INPUT_MQTT_LABEL'),
-            config.get('TASMOTA', 'TASMOTA_JSON_POWER_OUTPUT_MQTT_LABEL'),
-            config.getboolean('TASMOTA', 'TASMOTA_JSON_POWER_CALCULATE', fallback=False)
-        )
-    elif config.getboolean('SELECT_POWERMETER', 'USE_SHRDZM'):
-        return Shrdzm(
-            config.get('SHRDZM', 'SHRDZM_IP'),
-            config.get('SHRDZM', 'SHRDZM_USER'),
-            config.get('SHRDZM', 'SHRDZM_PASS')
-        )
-    elif config.getboolean('SELECT_POWERMETER', 'USE_EMLOG'):
-        return Emlog(
-            config.get('EMLOG', 'EMLOG_IP'),
-            config.get('EMLOG', 'EMLOG_METERINDEX'),
-            config.getboolean('EMLOG', 'EMLOG_JSON_POWER_CALCULATE', fallback=False)
-        )
-    elif config.getboolean('SELECT_POWERMETER', 'USE_IOBROKER'):
-        return IoBroker(
-            config.get('IOBROKER', 'IOBROKER_IP'),
-            config.get('IOBROKER', 'IOBROKER_PORT'),
-            config.get('IOBROKER', 'IOBROKER_CURRENT_POWER_ALIAS'),
-            config.getboolean('IOBROKER', 'IOBROKER_POWER_CALCULATE'),
-            config.get('IOBROKER', 'IOBROKER_POWER_INPUT_ALIAS'),
-            config.get('IOBROKER', 'IOBROKER_POWER_OUTPUT_ALIAS')
-        )
-    elif config.getboolean('SELECT_POWERMETER', 'USE_HOMEASSISTANT'):
-        return HomeAssistant(
-            config.get('HOMEASSISTANT', 'HA_IP'),
-            config.get('HOMEASSISTANT', 'HA_PORT'),
-            config.getboolean('HOMEASSISTANT', 'HA_HTTPS', fallback=False),
-            config.get('HOMEASSISTANT', 'HA_ACCESSTOKEN'),
-            config.get('HOMEASSISTANT', 'HA_CURRENT_POWER_ENTITY'),
-            config.getboolean('HOMEASSISTANT', 'HA_POWER_CALCULATE'),
-            config.get('HOMEASSISTANT', 'HA_POWER_INPUT_ALIAS'),
-            config.get('HOMEASSISTANT', 'HA_POWER_OUTPUT_ALIAS')
-        )
-    elif config.getboolean('SELECT_POWERMETER', 'USE_VZLOGGER'):
-        return VZLogger(
-            config.get('VZLOGGER', 'VZL_IP'),
-            config.get('VZLOGGER', 'VZL_PORT'),
-            config.get('VZLOGGER', 'VZL_UUID')
-        )
-    elif config.getboolean('SELECT_POWERMETER', 'USE_SCRIPT'):
-        return Script(
-            config.get('SCRIPT', 'SCRIPT_FILE'),
-            config.get('SCRIPT', 'SCRIPT_IP'),
-            config.get('SCRIPT', 'SCRIPT_USER'),
-            config.get('SCRIPT', 'SCRIPT_PASS')
-        )
-    elif config.getboolean('SELECT_POWERMETER', 'USE_AMIS_READER'):
-        return AmisReader(
-            config.get('AMIS_READER', 'AMIS_READER_IP')
-        )
-    elif config.getboolean('SELECT_POWERMETER', 'USE_MQTT'):
-        return MqttPowermeter(
-            config.get('MQTT_POWERMETER', 'MQTT_BROKER', fallback=config.get("MQTT_CONFIG", "MQTT_BROKER", fallback=None)),
-            config.getint('MQTT_POWERMETER', 'MQTT_PORT', fallback=config.getint("MQTT_CONFIG", "MQTT_PORT", fallback=1883)),
-            config.get('MQTT_POWERMETER', 'MQTT_TOPIC_INCOMING'),
-            config.get('MQTT_POWERMETER', 'MQTT_JSON_PATH_INCOMING', fallback=None),
-            config.get('MQTT_POWERMETER', 'MQTT_TOPIC_OUTGOING', fallback=None),
-            config.get('MQTT_POWERMETER', 'MQTT_JSON_PATH_OUTGOING', fallback=None),
-            config.get('MQTT_POWERMETER', 'MQTT_USERNAME', fallback=config.get('MQTT_CONFIG', 'MQTT_USERNAME', fallback=None)),
-            config.get('MQTT_POWERMETER', 'MQTT_PASSWORD', fallback=config.get('MQTT_CONFIG', 'MQTT_PASSWORD', fallback=None))
-        )
-    elif config.getboolean('SELECT_POWERMETER', 'USE_DEBUG_READER'):
-        return DebugReader()    
-    else:
-        raise Exception("Error: no metering defined!")
-
-def CreateIntermediatePowermeter(dtu: DTU) -> Powermeter:
-    shelly_ip = config.get('INTERMEDIATE_SHELLY', 'SHELLY_IP_INTERMEDIATE')
-    shelly_user = config.get('INTERMEDIATE_SHELLY', 'SHELLY_USER_INTERMEDIATE')
-    shelly_pass = config.get('INTERMEDIATE_SHELLY', 'SHELLY_PASS_INTERMEDIATE')
-    shelly_emeterindex = config.get('INTERMEDIATE_SHELLY', 'EMETER_INDEX')
-    if config.getboolean('SELECT_INTERMEDIATE_METER', 'USE_TASMOTA_INTERMEDIATE'):
-        return Tasmota(
-            config.get('INTERMEDIATE_TASMOTA', 'TASMOTA_IP_INTERMEDIATE'),
-            config.get('INTERMEDIATE_TASMOTA', 'TASMOTA_USER_INTERMEDIATE'),
-            config.get('INTERMEDIATE_TASMOTA', 'TASMOTA_PASS_INTERMEDIATE'),
-            config.get('INTERMEDIATE_TASMOTA', 'TASMOTA_JSON_STATUS_INTERMEDIATE'),
-            config.get('INTERMEDIATE_TASMOTA', 'TASMOTA_JSON_PAYLOAD_MQTT_PREFIX_INTERMEDIATE'),
-            config.get('INTERMEDIATE_TASMOTA', 'TASMOTA_JSON_POWER_MQTT_LABEL_INTERMEDIATE'),
-            config.get('INTERMEDIATE_TASMOTA', 'TASMOTA_JSON_POWER_INPUT_MQTT_LABEL_INTERMEDIATE', fallback=None),
-            config.get('INTERMEDIATE_TASMOTA', 'TASMOTA_JSON_POWER_OUTPUT_MQTT_LABEL_INTERMEDIATE', fallback=None),
-            config.getboolean('INTERMEDIATE_TASMOTA', 'TASMOTA_JSON_POWER_CALCULATE_INTERMEDIATE', fallback=False)
-        )
-    elif config.getboolean('SELECT_INTERMEDIATE_METER', 'USE_SHELLY_EM_INTERMEDIATE'):
-        return ShellyEM(shelly_ip, shelly_user, shelly_pass, shelly_emeterindex)
-    elif config.getboolean('SELECT_INTERMEDIATE_METER', 'USE_SHELLY_3EM_INTERMEDIATE'):
-        return Shelly3EM(shelly_ip, shelly_user, shelly_pass, shelly_emeterindex)
-    elif config.getboolean('SELECT_INTERMEDIATE_METER', 'USE_SHELLY_3EM_PRO_INTERMEDIATE'):
-        return Shelly3EMPro(shelly_ip, shelly_user, shelly_pass, shelly_emeterindex)
-    elif config.getboolean('SELECT_INTERMEDIATE_METER', 'USE_SHELLY_1PM_INTERMEDIATE'):
-        return Shelly1PM(shelly_ip, shelly_user, shelly_pass, shelly_emeterindex)
-    elif config.getboolean('SELECT_INTERMEDIATE_METER', 'USE_SHELLY_PLUS_1PM_INTERMEDIATE'):
-        return ShellyPlus1PM(shelly_ip, shelly_user, shelly_pass, shelly_emeterindex)
-    elif config.getboolean('SELECT_INTERMEDIATE_METER', 'USE_ESPHOME_INTERMEDIATE'):
-        return ESPHome(
-            config.get('INTERMEDIATE_ESPHOME', 'ESPHOME_IP_INTERMEDIATE'),
-            config.get('INTERMEDIATE_ESPHOME', 'ESPHOME_PORT_INTERMEDIATE', fallback='80'),
-            config.get('INTERMEDIATE_ESPHOME', 'ESPHOME_DOMAIN_INTERMEDIATE'),
-            config.get('INTERMEDIATE_ESPHOME', 'ESPHOME_ID_INTERMEDIATE')
-        )
-    elif config.getboolean('SELECT_INTERMEDIATE_METER', 'USE_SHRDZM_INTERMEDIATE'):
-        return Shrdzm(
-            config.get('INTERMEDIATE_SHRDZM', 'SHRDZM_IP_INTERMEDIATE'),
-            config.get('INTERMEDIATE_SHRDZM', 'SHRDZM_USER_INTERMEDIATE'),
-            config.get('INTERMEDIATE_SHRDZM', 'SHRDZM_PASS_INTERMEDIATE')
-        )
-    elif config.getboolean('SELECT_INTERMEDIATE_METER', 'USE_EMLOG_INTERMEDIATE'):
-        return Emlog(
-            config.get('INTERMEDIATE_EMLOG', 'EMLOG_IP_INTERMEDIATE'),
-            config.get('INTERMEDIATE_EMLOG', 'EMLOG_METERINDEX_INTERMEDIATE'),
-            config.getboolean('INTERMEDIATE_EMLOG', 'EMLOG_JSON_POWER_CALCULATE', fallback=False)
-        )
-    elif config.getboolean('SELECT_INTERMEDIATE_METER', 'USE_IOBROKER_INTERMEDIATE'):
-        return IoBroker(
-            config.get('INTERMEDIATE_IOBROKER', 'IOBROKER_IP_INTERMEDIATE'),
-            config.get('INTERMEDIATE_IOBROKER', 'IOBROKER_PORT_INTERMEDIATE'),
-            config.get('INTERMEDIATE_IOBROKER', 'IOBROKER_CURRENT_POWER_ALIAS_INTERMEDIATE'),
-            config.getboolean('INTERMEDIATE_IOBROKER', 'IOBROKER_POWER_CALCULATE', fallback=False),
-            config.get('INTERMEDIATE_IOBROKER', 'IOBROKER_POWER_INPUT_ALIAS_INTERMEDIATE', fallback=None),
-            config.get('INTERMEDIATE_IOBROKER', 'IOBROKER_POWER_OUTPUT_ALIAS_INTERMEDIATE', fallback=None)
-        )
-    elif config.getboolean('SELECT_INTERMEDIATE_METER', 'USE_HOMEASSISTANT_INTERMEDIATE'):
-        return HomeAssistant(
-            config.get('INTERMEDIATE_HOMEASSISTANT', 'HA_IP_INTERMEDIATE'),
-            config.get('INTERMEDIATE_HOMEASSISTANT', 'HA_PORT_INTERMEDIATE'),
-            config.getboolean('INTERMEDIATE_HOMEASSISTANT', 'HA_HTTPS_INTERMEDIATE', fallback=False),
-            config.get('INTERMEDIATE_HOMEASSISTANT', 'HA_ACCESSTOKEN_INTERMEDIATE'),
-            config.get('INTERMEDIATE_HOMEASSISTANT', 'HA_CURRENT_POWER_ENTITY_INTERMEDIATE'),
-            config.getboolean('INTERMEDIATE_HOMEASSISTANT', 'HA_POWER_CALCULATE_INTERMEDIATE', fallback=False),
-            config.get('INTERMEDIATE_HOMEASSISTANT', 'HA_POWER_INPUT_ALIAS_INTERMEDIATE', fallback=None),
-            config.get('INTERMEDIATE_HOMEASSISTANT', 'HA_POWER_OUTPUT_ALIAS_INTERMEDIATE', fallback=None)
-        )
-    elif config.getboolean('SELECT_INTERMEDIATE_METER', 'USE_VZLOGGER_INTERMEDIATE'):
-        return VZLogger(
-            config.get('INTERMEDIATE_VZLOGGER', 'VZL_IP_INTERMEDIATE'),
-            config.get('INTERMEDIATE_VZLOGGER', 'VZL_PORT_INTERMEDIATE'),
-            config.get('INTERMEDIATE_VZLOGGER', 'VZL_UUID_INTERMEDIATE')
-        )
-    elif config.getboolean('SELECT_INTERMEDIATE_METER', 'USE_SCRIPT_INTERMEDIATE'):
-        return Script(
-            config.get('INTERMEDIATE_SCRIPT', 'SCRIPT_FILE_INTERMEDIATE'),
-            config.get('INTERMEDIATE_SCRIPT', 'SCRIPT_IP_INTERMEDIATE'),
-            config.get('INTERMEDIATE_SCRIPT', 'SCRIPT_USER_INTERMEDIATE'),
-            config.get('INTERMEDIATE_SCRIPT', 'SCRIPT_PASS_INTERMEDIATE')
-        )
-    elif config.getboolean('SELECT_INTERMEDIATE_METER', 'USE_MQTT_INTERMEDIATE'):
-        return MqttPowermeter(
-            config.get('INTERMEDIATE_MQTT', 'MQTT_BROKER', fallback=config.get("MQTT_CONFIG", "MQTT_BROKER", fallback=None)),
-            config.getint('INTERMEDIATE_MQTT', 'MQTT_PORT', fallback=config.getint("MQTT_CONFIG", "MQTT_PORT", fallback=1883)),
-            config.get('INTERMEDIATE_MQTT', 'MQTT_TOPIC_INCOMING'),
-            config.get('INTERMEDIATE_MQTT', 'MQTT_JSON_PATH_INCOMING', fallback=None),
-            config.get('INTERMEDIATE_MQTT', 'MQTT_TOPIC_OUTGOING', fallback=None),
-            config.get('INTERMEDIATE_MQTT', 'MQTT_JSON_PATH_OUTGOING', fallback=None),
-            config.get('INTERMEDIATE_MQTT', 'MQTT_USERNAME', fallback=config.get("MQTT_CONFIG", "MQTT_USERNAME", fallback=None)),
-            config.get('INTERMEDIATE_MQTT', 'MQTT_PASSWORD', fallback=config.get("MQTT_CONFIG", "MQTT_PASSWORD", fallback=None))
-        )
-    elif config.getboolean('SELECT_INTERMEDIATE_METER', 'USE_AMIS_READER_INTERMEDIATE'):
-        return AmisReader(
-            config.get('INTERMEDIATE_AMIS_READER', 'AMIS_READER_IP_INTERMEDIATE')
-        )
-    elif config.getboolean('SELECT_INTERMEDIATE_METER', 'USE_DEBUG_READER_INTERMEDIATE'):
-        return DebugReader()
-    else:
-        return dtu
-
-def CreateDTU() -> DTU:
-    inverter_count = config.getint('COMMON', 'INVERTER_COUNT')
-    if config.getboolean('SELECT_DTU', 'USE_AHOY'):
-        return AhoyDTU(
-            inverter_count,
-            config.get('AHOY_DTU', 'AHOY_IP'),
-            config.get('AHOY_DTU', 'AHOY_PASS', fallback='')
-        )
-    elif config.getboolean('SELECT_DTU', 'USE_OPENDTU'):
-        return OpenDTU(
-            inverter_count,
-            config.get('OPEN_DTU', 'OPENDTU_IP'),
-            config.get('OPEN_DTU', 'OPENDTU_USER'),
-            config.get('OPEN_DTU', 'OPENDTU_PASS')
-        )
-    elif config.getboolean('SELECT_DTU', 'USE_DEBUG'):
-        return DebugDTU(
-            inverter_count
-        )    
-    else:
-        raise Exception("Error: no DTU defined!")
 
 # ----- START -----
 logger.info("Author:         %s / Script Version: %s",__author__, __version__)
 logger.info("Contributor(s): %s", __contributors__)
 
 # read config:
-logger.info("read config file: " + str(Path.joinpath(Path(__file__).parent.resolve(), "HoymilesZeroExport_Config.ini")))
-if args.config:
-    logger.info("read additional config file: " + args.config)
+load_config()
 
-VERSION = config.get('VERSION', 'VERSION')
-logger.info("Config file V %s", VERSION)
-
-MAX_RETRIES = config.getint('COMMON', 'MAX_RETRIES', fallback=3)
-RETRY_STATUS_CODES = config.get('COMMON', 'RETRY_STATUS_CODES', fallback='500,502,503,504')
-RETRY_BACKOFF_FACTOR = config.getfloat('COMMON', 'RETRY_BACKOFF_FACTOR', fallback=0.1)
 retry = Retry(total=MAX_RETRIES,
               backoff_factor=RETRY_BACKOFF_FACTOR,
               status_forcelist=[int(status_code) for status_code in RETRY_STATUS_CODES.split(',')],
@@ -784,28 +585,6 @@ retry = Retry(total=MAX_RETRIES,
 adapter = HTTPAdapter(max_retries=retry)
 session.mount('http://', adapter)
 session.mount('https://', adapter)
-
-USE_AHOY = config.getboolean('SELECT_DTU', 'USE_AHOY')
-USE_OPENDTU = config.getboolean('SELECT_DTU', 'USE_OPENDTU')
-AHOY_IP = config.get('AHOY_DTU', 'AHOY_IP')
-OPENDTU_IP = config.get('OPEN_DTU', 'OPENDTU_IP')
-OPENDTU_USER = config.get('OPEN_DTU', 'OPENDTU_USER')
-OPENDTU_PASS = config.get('OPEN_DTU', 'OPENDTU_PASS')
-DTU = CreateDTU()
-POWERMETER = CreatePowermeter()
-INTERMEDIATE_POWERMETER = CreateIntermediatePowermeter(DTU)
-INVERTER_COUNT = config.getint('COMMON', 'INVERTER_COUNT')
-LOOP_INTERVAL_IN_SECONDS = config.getint('COMMON', 'LOOP_INTERVAL_IN_SECONDS')
-SET_LIMIT_TIMEOUT_SECONDS = config.getint('COMMON', 'SET_LIMIT_TIMEOUT_SECONDS')
-SET_POWER_STATUS_DELAY_IN_SECONDS = config.getint('COMMON', 'SET_POWER_STATUS_DELAY_IN_SECONDS')
-POLL_INTERVAL_IN_SECONDS = config.getint('COMMON', 'POLL_INTERVAL_IN_SECONDS')
-MAX_DIFFERENCE_BETWEEN_LIMIT_AND_OUTPUTPOWER = config.getint('COMMON', 'MAX_DIFFERENCE_BETWEEN_LIMIT_AND_OUTPUTPOWER')
-SET_POWERSTATUS_CNT = config.getint('COMMON', 'SET_POWERSTATUS_CNT')
-SLOW_APPROX_FACTOR_IN_PERCENT = config.getint('COMMON', 'SLOW_APPROX_FACTOR_IN_PERCENT')
-LOG_TEMPERATURE = config.getboolean('COMMON', 'LOG_TEMPERATURE')
-SET_INVERTER_TO_MIN_ON_POWERMETER_ERROR = config.getboolean('COMMON', 'SET_INVERTER_TO_MIN_ON_POWERMETER_ERROR', fallback=False)
-powermeter_target_point = config.getint('CONTROL', 'POWERMETER_TARGET_POINT')
-MAX_UNLIMITED_CHARGE_SOC = config.getint('CONTROL', 'MAX_UNLIMITED_CHARGE_SOC')
 
 for i in range(INVERTER_COUNT):
     SERIAL_NUMBER.append(config.get('INVERTER_' + str(i + 1), 'SERIAL_NUMBER', fallback=''))

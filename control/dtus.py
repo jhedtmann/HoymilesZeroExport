@@ -80,7 +80,7 @@ class AhoyDTU(DTU):
         parsed_data = self.get_json(f'/api/inverter/id/{p_inverter_id}')
         return cast_to_int(parsed_data["ch"][0][actual_power_index])
 
-    def CheckMinVersion(self):
+    def check_min_version(self):
         min_version = '0.8.80'
         parsed_data = self.get_json('/api/system')
         try:
@@ -187,7 +187,7 @@ class AhoyDTU(DTU):
             self.authenticate()
             self.set_limit(p_inverter_id, p_limit)
             return
-        if response["success"] == False:
+        if not response["success"]:
             raise Exception("Error: SetLimitAhoy Request error")
         CURRENT_LIMIT[p_inverter_id] = p_limit
 
@@ -240,7 +240,7 @@ class OpenDTU(DTU):
         min_version = 'v24.2.12'
         parsed_data = self.get_json('/api/system/status')
         open_dtu_version = str((parsed_data["git_hash"]))
-        if ("-Database" in open_dtu_version):  # trim string "v24.5.27-Database"
+        if "-Database" in open_dtu_version:  # trim string "v24.5.27-Database"
             open_dtu_version = open_dtu_version.replace("-Database", "")
         logger.info('OpenDTU: Current Version: %s', open_dtu_version)
         if version.parse(open_dtu_version) < version.parse(min_version):
@@ -303,7 +303,7 @@ class OpenDTU(DTU):
             HOY_PANEL_VOLTAGE_LIST[p_inverter_id].pop(0)
         max_value = None
         for num in HOY_PANEL_VOLTAGE_LIST[p_inverter_id]:
-            if (max_value is None or num > max_value):
+            if max_value is None or num > max_value:
                 max_value = num
 
         return max_value

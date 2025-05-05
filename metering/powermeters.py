@@ -109,13 +109,13 @@ class ESPHome(Powermeter):
         self.domain = domain
         self.id = id
 
-    def GetJson(self, path):
+    def get_json(self, path):
         url = f'http://{self.ip}:{self.port}{path}'
         return session.get(url, timeout=10).json()
 
     def get_powermeter_watts(self):
-        ParsedData = self.GetJson(f'/{self.domain}/{self.id}')
-        return cast_to_int(ParsedData['value'])
+        parsed_data = self.get_json(f'/{self.domain}/{self.id}')
+        return cast_to_int(parsed_data['value'])
 
 
 class Shrdzm(Powermeter):
@@ -124,13 +124,13 @@ class Shrdzm(Powermeter):
         self.user = user
         self.password = password
 
-    def GetJson(self, path):
+    def get_json(self, path):
         url = f'http://{self.ip}{path}'
         return session.get(url, timeout=10).json()
 
     def get_powermeter_watts(self):
-        ParsedData = self.GetJson(f'/getLastData?user={self.user}&password={self.password}')
-        return cast_to_int(cast_to_int(ParsedData['1.7.0']) - cast_to_int(ParsedData['2.7.0']))
+        parsed_data = self.get_json(f'/getLastData?user={self.user}&password={self.password}')
+        return cast_to_int(cast_to_int(parsed_data['1.7.0']) - cast_to_int(parsed_data['2.7.0']))
 
 
 class Emlog(Powermeter):
@@ -139,18 +139,18 @@ class Emlog(Powermeter):
         self.meterindex = meterindex
         self.json_power_calculate = json_power_calculate
 
-    def GetJson(self, path):
+    def get_json(self, path):
         url = f'http://{self.ip}{path}'
         return session.get(url, timeout=10).json()
 
     def get_powermeter_watts(self):
-        ParsedData = self.GetJson(f'/pages/getinformation.php?heute&meterindex={self.meterindex}')
+        parsed_data = self.get_json(f'/pages/getinformation.php?heute&meterindex={self.meterindex}')
         if not self.json_power_calculate:
-            return cast_to_int(ParsedData['Leistung170'])
+            return cast_to_int(parsed_data['Leistung170'])
         else:
-            input = ParsedData['Leistung170']
-            ouput = ParsedData['Leistung270']
-            return cast_to_int(input - ouput)
+            input_power = parsed_data['Leistung170']
+            ouput_power = parsed_data['Leistung270']
+            return cast_to_int(input_power - ouput_power)
 
 
 class IoBroker(Powermeter):

@@ -36,3 +36,12 @@ def get_number_array(p_excluded_panels):
         number = int(number_str.strip())
         result.append(number)
     return result
+
+def extract_json_value(data, path):
+    from jsonpath_ng import parse
+    jsonpath_expr = parse(path)
+    match = jsonpath_expr.find(data)
+    if match:
+        return int(float(match[0].value))
+    else:
+        raise ValueError("No match found for the JSON path")
